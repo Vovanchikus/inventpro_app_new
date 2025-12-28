@@ -17,8 +17,9 @@ class _MainScreenState extends State<MainScreen> {
   final PageController _pageController = PageController();
 
   // GlobalKey для доступа к состоянию WarehouseScreen
-  final GlobalKey<WarehouseScreenState> warehouseKey =
-      GlobalKey<WarehouseScreenState>();
+  // GlobalKey для доступа к состоянию WarehouseScreen
+  final GlobalKey<State<WarehouseScreen>> warehouseKey =
+      GlobalKey<State<WarehouseScreen>>();
 
   // Названия вкладок
   final List<String> titles = ['Главная', 'Склад', 'История', 'Документы'];

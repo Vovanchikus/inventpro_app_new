@@ -1,192 +1,138 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
+import '../models/product.dart';
+import '../models/category.dart';
 import '../widgets/product_card.dart';
 import '../theme/colors.dart';
 import 'product_screen.dart';
+import '../boxes/hive_boxes.dart';
 
 class WarehouseScreen extends StatefulWidget {
   const WarehouseScreen({super.key});
 
   @override
-  WarehouseScreenState createState() => WarehouseScreenState();
+  State<WarehouseScreen> createState() => _WarehouseScreenState();
 }
 
-class WarehouseScreenState extends State<WarehouseScreen> {
+class _WarehouseScreenState extends State<WarehouseScreen> {
   final TextEditingController _searchController = TextEditingController();
-  late List<Map<String, dynamic>> _products;
-  late List<Map<String, dynamic>> _filteredProducts;
 
-  // Категории с вложенностью
-  late List<Map<String, dynamic>> _categories;
+  late Box<Product> _productBox;
+  late Box<Category> _categoryBox;
 
-  // Выбранная категория
-  String? _selectedCategoryPath;
+  List<Product> _filteredProducts = [];
+  List<Category> _categories = [];
 
-  // Раскрытые категории
-  Map<String, bool> _expandedCategories = {};
+  int? _selectedCategoryId;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-
-    // Продукты с categoryPath
-    _products = List.generate(450, (index) {
-      double price = (50 + index % 100).toDouble();
-      double quantity = (1 + index % 20).toDouble();
-      double total = price * quantity;
-
-      // Простая имитация категории
-      String categoryPath;
-      if (index % 2 == 0) {
-        categoryPath = 'Категория 1/Подкатегория 1-1';
-      } else if (index % 3 == 0) {
-        categoryPath = 'Категория 1/Подкатегория 1-2';
-      } else {
-        categoryPath = 'Категория 2';
-      }
-
-      return {
-        'title': 'Товар ${index + 1}',
-        'inventory': 'INV-${1000 + index}',
-        'price': price,
-        'quantity': quantity,
-        'total': total,
-        'categoryPath': categoryPath,
-      };
-    });
-
-    _filteredProducts = List.from(_products);
-
-    _searchController.addListener(_onSearchChanged);
-
-    // Пример категорий с вложенностью
-    _categories = [
-      {
-        'name': 'Категория 1',
-        'children': [
-          {
-            'name': 'Подкатегория 1-1',
-            'children': [
-              {'name': 'Подподкатегория 1-1-1', 'children': []},
-              {'name': 'Подподкатегория 1-1-2', 'children': []},
-            ],
-          },
-          {'name': 'Подкатегория 1-2', 'children': []},
-        ],
-      },
-      {'name': 'Категория 2', 'children': []},
-    ];
+    _initHive();
+    _searchController.addListener(_applyFilters);
   }
 
-  void _onSearchChanged() {
-    _applyFilters();
+  Future<void> _initHive() async {
+    _productBox = await Hive.openBox<Product>(HiveBoxes.products);
+    _categoryBox = await Hive.openBox<Category>(HiveBoxes.categories);
+
+    _loadLocalData();
   }
 
+  void _loadLocalData() {
+    _categories = _categoryBox.values.toList();
+    _filteredProducts = _productBox.values.toList();
+
+    setState(() => _loading = false);
+  }
+
+  // -------------------------------
+  // 🔹 ГЛАВНАЯ ЛОГИКА ФИЛЬТРАЦИИ
+  // -------------------------------
   void _applyFilters() {
     final query = _searchController.text.toLowerCase();
+
     setState(() {
-      _filteredProducts = _products.where((p) {
-        final title = (p['title'] as String).toLowerCase();
-        final inventory = (p['inventory'] as String).toLowerCase();
+      _filteredProducts = _productBox.values.where((product) {
         final matchesSearch =
-            title.contains(query) || inventory.contains(query);
+            product.name.toLowerCase().contains(query) ||
+            product.invNumber.toLowerCase().contains(query);
 
         final matchesCategory =
-            _selectedCategoryPath == null ||
-            (p['categoryPath'] as String).startsWith(_selectedCategoryPath!);
+            _selectedCategoryId == null ||
+            _isCategoryMatch(product.categoryId, _selectedCategoryId!);
 
         return matchesSearch && matchesCategory;
       }).toList();
     });
   }
 
-  void _expandParentCategories(String path) {
-    List<String> parts = path.split('/');
-    String current = '';
-    for (var part in parts) {
-      current = current.isEmpty ? part : '$current/$part';
-      _expandedCategories[current] = true;
+  /// ✅ Проверка: принадлежит ли категория товару
+  /// или любой из её родительских
+  bool _isCategoryMatch(int productCategoryId, int selectedCategoryId) {
+    int? currentId = productCategoryId;
+
+    while (currentId != null && currentId != 0) {
+      if (currentId == selectedCategoryId) {
+        return true;
+      }
+      currentId = _categoryBox.get(currentId)?.parentId;
     }
+    return false;
   }
 
-  /// Открыть нижнюю панель фильтров
-  void showFilterBottomSheet() {
+  void _selectCategory(int? id) {
+    _selectedCategoryId = id;
+    _applyFilters();
+    Navigator.of(context).pop();
+  }
+
+  // -------------------------------
+  // 🔹 ДЕРЕВО КАТЕГОРИЙ
+  // -------------------------------
+  Widget _buildCategoryTree(int? parentId) {
+    final children = _categories.where((c) => c.parentId == parentId).toList();
+
+    if (children.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: children.map((category) {
+        return ExpansionTile(
+          key: ValueKey(category.id),
+          title: Text(
+            category.name,
+            style: TextStyle(
+              color: _selectedCategoryId == category.id
+                  ? AppColors.brand
+                  : Colors.black,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          children: [
+            _buildCategoryTree(category.id),
+            ListTile(
+              title: const Text('Выбрать эту категорию'),
+              onTap: () => _selectCategory(category.id),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  void _showCategoryFilter() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.6,
-          padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView(child: _buildCategoryList(_categories)),
-        );
-      },
-    );
-  }
-
-  Widget _buildCategoryList(
-    List<Map<String, dynamic>> categories, [
-    String parentPath = '',
-    int level = 0,
-  ]) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: categories.map((cat) {
-        String fullPath = parentPath.isEmpty
-            ? cat['name']
-            : '$parentPath/${cat['name']}';
-        bool hasChildren = (cat['children'] as List).isNotEmpty;
-
-        // Подтекст (можно менять на что угодно, например количество товаров)
-        String subtitle = cat['subtitle'] ?? 'Описание категории';
-
-        return ExpansionTile(
-          key: PageStorageKey(fullPath),
-          initiallyExpanded: _expandedCategories[fullPath] ?? false,
-          title: Padding(
-            padding: EdgeInsets.only(left: level * 8.0),
-            child: Text(
-              cat['name'],
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: _selectedCategoryPath == fullPath
-                    ? AppColors.brand
-                    : Colors.black,
-              ),
-            ),
-          ),
-          subtitle: Padding(
-            padding: EdgeInsets.only(left: level * 8.0),
-            child: Text(
-              subtitle,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-          // Если нет подкатегорий, стрелка не показывается
-          trailing: hasChildren ? null : const SizedBox.shrink(),
-          children: hasChildren
-              ? (cat['children'] as List)
-                    .map<Widget>(
-                      (child) =>
-                          _buildCategoryList([child], fullPath, level + 1),
-                    )
-                    .toList()
-              : [],
-          onExpansionChanged: (expanded) {
-            setState(() {
-              _expandedCategories[fullPath] = expanded;
-              if (!hasChildren && expanded) {
-                _selectedCategoryPath = fullPath;
-                _expandParentCategories(fullPath);
-                _applyFilters();
-                Navigator.of(context).pop(); // закрываем bottom sheet
-              }
-            });
-          },
-        );
-      }).toList(),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(child: _buildCategoryTree(null)),
+      ),
     );
   }
 
@@ -196,14 +142,20 @@ class WarehouseScreenState extends State<WarehouseScreen> {
     super.dispose();
   }
 
+  // -------------------------------
+  // 🔹 UI
+  // -------------------------------
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return SafeArea(
       child: Column(
         children: [
-          // Поиск
           Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.all(12),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
@@ -211,64 +163,45 @@ class WarehouseScreenState extends State<WarehouseScreen> {
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.filter_list),
-                  onPressed: showFilterBottomSheet,
+                  onPressed: _showCategoryFilter,
                 ),
+                filled: true,
+                fillColor: Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
                 ),
-                fillColor: Colors.white,
-                filled: true,
               ),
             ),
           ),
-
-          // Список товаров
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
               itemCount: _filteredProducts.length,
-              itemBuilder: (context, index) {
-                final p = _filteredProducts[index];
+              itemBuilder: (_, i) {
+                final product = _filteredProducts[i];
+                final categoryName =
+                    _categoryBox.get(product.categoryId)?.name ?? '-';
+
                 return ProductCard(
-                  title: p['title'] as String,
-                  inventoryNumber: p['inventory'] as String,
-                  price: p['price'] as double,
-                  quantity: p['quantity'] as double,
-                  total: p['total'] as double,
+                  title: product.name,
+                  inventoryNumber: product.invNumber,
+                  price: product.price,
+                  quantity: product.quantity,
+                  total: product.sum,
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => ProductScreen(
-                          title: p['title'] as String,
-                          inventoryNumber: p['inventory'] as String,
-                          price: p['price'] as double,
-                          quantity: p['quantity'] as double,
-                          total: p['total'] as double,
-                          categoryPath: p['categoryPath'] as String,
-                          images: [
-                            'https://codestore.my1.ru/izobrazhenie_whatsapp_2025-10-22_v_11.22.22_acc9fa.jpg',
-                            'https://codestore.my1.ru/izobrazhenie_whatsapp_2025-10-22_v_11.22.22_182a2d.jpg',
-                            'https://codestore.my1.ru/izobrazhenie_whatsapp_2025-10-22_v_11.22.22_da5ee5.jpg',
-                          ],
-                          history: [
-                            {
-                              'title': 'Поступление на склад',
-                              'date': '28.12.2025',
-                              'description': 'Товар принят в количестве 10 шт.',
-                            },
-                            {
-                              'title': 'Продажа',
-                              'date': '30.12.2025',
-                              'description': 'Продано 2 шт.',
-                            },
-                            {
-                              'title': 'Продажа',
-                              'date': '30.12.2025',
-                              'description': 'Продано 2 шт.',
-                            },
-                          ],
+                        builder: (_) => ProductScreen(
+                          title: product.name,
+                          inventoryNumber: product.invNumber,
+                          price: product.price,
+                          quantity: product.quantity,
+                          total: product.sum,
+                          categoryPath: categoryName,
+                          images: const [],
+                          history: const [],
                         ),
                       ),
                     );

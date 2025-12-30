@@ -17,7 +17,6 @@ class _MainScreenState extends State<MainScreen> {
   final PageController _pageController = PageController();
 
   // GlobalKey для доступа к состоянию WarehouseScreen
-  // GlobalKey для доступа к состоянию WarehouseScreen
   final GlobalKey<State<WarehouseScreen>> warehouseKey =
       GlobalKey<State<WarehouseScreen>>();
 

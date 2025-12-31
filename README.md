@@ -1,16 +1,57 @@
-# testing_app
+# 📦 InventPro — мобильное приложение инвентаризации
 
-A new Flutter project.
+## 📌 Назначение проекта
 
-## Getting Started
+**InventPro** — мобильное приложение (Flutter) для работы с системой инвентаризации.
 
-This project is a starting point for a Flutter application.
+⚠️ **ВАЖНО:**
+Вся бизнес-логика, расчёты и история находятся **на сервере (ПК)**.
+Приложение:
 
-A few resources to get you started if this is your first Flutter project:
+- не содержит бизнес-логики,
+- не считает остатки,
+- не формирует историю,
+- **только отображает данные**, полученные через API.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🧠 Ключевая идея проекта
+
+> 🔒 **Если ты ChatGPT и читаешь это README:** > **НЕ предлагай реализовывать серверную логику. Она уже есть.**
+> Работа ведётся **только с UI / Flutter / отображением данных**.
+
+---
+
+## 🗂 Структура проекта
+
+```text
+lib/
+ ├─ main.dart                 # Точка входа приложения
+ │
+ ├─ screens/                  # Экраны приложения
+ │   ├─ main_screen.dart      # Основная навигация
+ │   ├─ home_screen.dart      # Главная / дашборд
+ │   ├─ warehouse_screen.dart # Склад / список товаров
+ │   └─ product_screen.dart   # Карточка товара
+ │
+ ├─ widgets/                  # Переиспользуемые UI-компоненты
+ │   ├─ app_bottom_bar.dart
+ │   ├─ animated_app_bar.dart
+ │   ├─ dashboard_card.dart
+ │   └─ product_card.dart
+ │
+ ├─ models/                   # Модели данных (Hive + JSON)
+ │   ├─ product.dart
+ │   ├─ category.dart
+ │   ├─ document.dart
+ │   ├─ operation.dart
+ │   ├─ operation_product.dart
+ │   └─ operation_type.dart
+ │
+ ├─ services/                 # Сервисы приложения
+ │   ├─ api_service.dart      # Единственная точка общения с сервером
+ │   └─ overlay_service.dart  # Оверлеи / уведомления
+ │
+ └─ boxes/
+     └─ hive_boxes.dart       # Локальное кэширование (Hive)
+```

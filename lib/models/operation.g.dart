@@ -19,8 +19,8 @@ class OperationAdapter extends TypeAdapter<Operation> {
     return Operation(
       id: fields[0] as int,
       typeId: fields[1] as int,
-      createdAt: fields[2] as DateTime,
-      updatedAt: fields[3] as DateTime,
+      createdAt: fields[2] as DateTime?,
+      updatedAt: fields[3] as DateTime?,
     );
   }
 

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+
 import '../theme/colors.dart';
 import '../widgets/app_bottom_bar.dart';
+
 import 'home_screen.dart';
 import 'warehouse_screen.dart';
+import 'operation_history_screen.dart';
+import 'qr_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -12,42 +16,42 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   int _currentIndex = 0;
   final PageController _pageController = PageController();
 
-  // GlobalKey для доступа к состоянию WarehouseScreen
   final GlobalKey<State<WarehouseScreen>> warehouseKey =
       GlobalKey<State<WarehouseScreen>>();
+  final GlobalKey<HomeScreenState> homeKey = HomeScreen.globalKey;
 
-  // Названия вкладок
   final List<String> titles = ['Главная', 'Склад', 'История', 'Документы'];
 
-  // Действия в AppBar
-  late final List<Widget> actions = [
-    SvgPicture.asset('assets/icons/cloud-reload.svg', width: 28, height: 28),
-    const SizedBox.shrink(),
-    const SizedBox.shrink(),
-  ];
+  late final AnimationController _syncController;
+  late final Animation<double> _rotationAnimation;
 
-  // Экраны
-  late final List<Widget> screens = [
-    const HomeScreen(),
-    WarehouseScreen(key: warehouseKey),
-    const Placeholder(),
-    const Placeholder(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+
+    _syncController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+
+    // Плавное ускорение/торможение стрелок
+    _rotationAnimation =
+        Tween<double>(begin: 0, end: 6.28319 * 3) // x3 скорость
+            .animate(
+              CurvedAnimation(parent: _syncController, curve: Curves.linear),
+            );
+  }
 
   void _onTabTap(int index) {
     if (_currentIndex == index) return;
-
-    setState(() {
-      _currentIndex = index;
-    });
-
+    setState(() => _currentIndex = index);
     _pageController.animateToPage(
       index,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 350),
       curve: Curves.easeOutCubic,
     );
   }
@@ -55,23 +59,84 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _syncController.dispose();
     super.dispose();
+  }
+
+  /// ==========================
+  /// Кнопка синхронизации
+  /// ==========================
+  Widget _buildSyncButton() {
+    return GestureDetector(
+      onTap: () async {
+        if (homeKey.currentState == null) return;
+
+        _syncController.repeat(); // запускаем вращение
+
+        try {
+          await homeKey.currentState!.manualSync();
+        } catch (_) {
+          // Ошибки игнорируем, больше не меняем иконку
+        } finally {
+          _syncController.reset(); // останавливаем вращение
+        }
+      },
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // ===== Облако =====
+            SvgPicture.string(
+              '''
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M4.24988 11C4.24988 6.71979 7.71967 3.25 11.9999 3.25C15.7586 3.25 18.8914 5.92521 19.5999 9.47575C21.997 10.169 23.7499 12.3791 23.7499 15C23.7499 18.1756 21.1755 20.75 17.9999 20.75H4.99988C2.37653 20.75 0.249878 18.6234 0.249878 16C0.249878 13.6298 1.98596 11.665 4.25589 11.3079C4.25189 11.2057 4.24988 11.1031 4.24988 11ZM11.9999 4.75C8.5481 4.75 5.74988 7.54822 5.74988 11C5.74988 11.3041 5.77154 11.6026 5.81329 11.8944C5.84442 12.1119 5.7786 12.3321 5.63321 12.4969C5.48783 12.6616 5.2775 12.7543 5.0578 12.7505C5.03845 12.7502 5.01914 12.75 4.99988 12.75C3.20495 12.75 1.74988 14.2051 1.74988 16C1.74988 17.7949 3.20495 19.25 4.99988 19.25H17.9999C20.3471 19.25 22.2499 17.3472 22.2499 15C22.2499 12.9271 20.7651 11.1994 18.8007 10.8252C18.4825 10.7646 18.2391 10.5064 18.1973 10.1852C17.7985 7.11868 15.1752 4.75 11.9999 4.75Z" fill="currentColor"/>
+</svg>
+''',
+              width: 28,
+              height: 28,
+              color: AppColors.textTitle,
+            ),
+
+            // ===== Вращающиеся стрелки =====
+            AnimatedBuilder(
+              animation: _rotationAnimation,
+              builder: (_, child) {
+                return Transform.rotate(
+                  angle: _rotationAnimation.value,
+                  alignment: Alignment.center, // вращаем вокруг центра стрелок
+                  child: child,
+                );
+              },
+              child: SvgPicture.string(
+                '''
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M15.6666 8.58325C15.2524 8.58325 14.9166 8.91904 14.9166 9.33325V9.68346C14.139 8.99895 13.1183 8.58332 11.9999 8.58332C9.94092 8.58332 8.21272 9.99159 7.72246 11.8964C7.61921 12.2975 7.8607 12.7064 8.26184 12.8096C8.66298 12.9129 9.07187 12.6714 9.17512 12.2703C9.49894 11.0121 10.6419 10.0833 11.9999 10.0833C12.7232 10.0833 13.3855 10.3466 13.8957 10.7832H13.4666C13.0524 10.7832 12.7166 11.119 12.7166 11.5332C12.7166 11.9474 13.0524 12.2832 13.4666 12.2832H15.3407C15.3548 12.2836 15.3689 12.2836 15.3831 12.2832H15.6666C16.0808 12.2832 16.4166 11.9474 16.4166 11.5332V9.33325C16.4166 8.91904 16.0808 8.58325 15.6666 8.58325Z" fill="currentColor"/>
+<path d="M9.08325 16.6665C9.08325 17.0807 8.74747 17.4165 8.33325 17.4165C7.91904 17.4165 7.58325 17.0807 7.58325 16.6665V14.4665C7.58325 14.2676 7.66227 14.0769 7.80292 13.9362C7.94357 13.7956 8.13434 13.7165 8.33325 13.7165H10.5333C10.9475 13.7165 11.2833 14.0523 11.2833 14.4665C11.2833 14.8808 10.9475 15.2165 10.5333 15.2165H10.1039C10.6141 15.6533 11.2766 15.9167 11.9999 15.9167C13.358 15.9167 14.501 14.9879 14.8248 13.7298C14.928 13.3286 15.3369 13.0871 15.738 13.1904C16.1392 13.2936 16.3807 13.7025 16.2774 14.1036C15.7872 16.0084 14.059 17.4167 11.9999 17.4167C10.8816 17.4167 9.8609 17.0011 9.08325 16.3166V16.6665Z" fill="currentColor"/>
+</svg>
+''',
+                width: 28,
+                height: 28,
+                color: AppColors.brand,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bgApp,
-
-      /// ================= APP BAR =================
       appBar: AppBar(
         backgroundColor: AppColors.bgApp,
         elevation: 0,
         toolbarHeight: 56,
-
-        /// ===== Анимированный title =====
         title: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 300),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
           transitionBuilder: (child, animation) {
@@ -102,36 +167,40 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
         ),
-
-        /// ===== Анимированный action =====
         actions: [
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
+            duration: const Duration(milliseconds: 250),
             transitionBuilder: (child, animation) {
               return ScaleTransition(
                 scale: Tween<double>(begin: 0.85, end: 1.0).animate(animation),
                 child: FadeTransition(opacity: animation, child: child),
               );
             },
-            child: actions[_currentIndex] is SizedBox
-                ? const SizedBox.shrink(key: ValueKey('empty'))
-                : actions[_currentIndex],
+            child: _currentIndex == 0
+                ? _buildSyncButton()
+                : const SizedBox.shrink(key: ValueKey('empty')),
           ),
+          const SizedBox(width: 8),
         ],
       ),
-
-      /// ================= BODY =================
       body: PageView(
         controller: _pageController,
-        physics: const NeverScrollableScrollPhysics(), // свайп отключен
-        children: screens,
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          HomeScreen(key: homeKey),
+          WarehouseScreen(key: warehouseKey),
+          OperationHistoryScreen(),
+          const Placeholder(),
+        ],
       ),
-
-      /// ================= BOTTOM BAR =================
       bottomNavigationBar: AppBottomBar(
         currentIndex: _currentIndex,
         onTap: _onTabTap,
-        onCenterTap: () {},
+        onCenterTap: () {
+          Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const QrScreen()));
+        },
       ),
     );
   }

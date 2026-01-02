@@ -94,7 +94,6 @@ class _CenterButton extends StatefulWidget {
   final String icon;
 
   const _CenterButton({
-    super.key,
     required this.diameter,
     required this.onTap,
     required this.icon,

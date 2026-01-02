@@ -10,10 +10,10 @@ class Operation extends HiveObject {
   int typeId;
 
   @HiveField(2)
-  DateTime createdAt;
+  DateTime? createdAt;
 
   @HiveField(3)
-  DateTime updatedAt;
+  DateTime? updatedAt;
 
   Operation({
     required this.id,

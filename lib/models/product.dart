@@ -33,6 +33,10 @@ class Product extends HiveObject {
   @HiveField(9)
   DateTime createdAt;
 
+  // 🔹 Новое поле для списка изображений
+  @HiveField(10)
+  List<String> images;
+
   Product({
     required this.id,
     required this.name,
@@ -44,5 +48,6 @@ class Product extends HiveObject {
     required this.categoryId,
     required this.updatedAt,
     required this.createdAt,
+    this.images = const [],
   });
 }

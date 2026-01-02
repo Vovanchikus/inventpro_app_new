@@ -17,28 +17,37 @@ class OperationProductAdapter extends TypeAdapter<OperationProduct> {
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
     return OperationProduct(
-      operationId: fields[0] as int,
-      productId: fields[1] as int,
-      quantity: fields[2] as double,
-      sum: fields[3] as double,
-      counteragent: fields[4] as String?,
+      id: fields[0] as int,
+      product: fields[1] as Product?,
+      operation: fields[2] as Operation?,
+      counteragent: fields[3] as String?,
+      quantity: fields[4] as double?,
+      docDate: fields[5] as String?,
+      docName: fields[6] as String?,
+      docNum: fields[7] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, OperationProduct obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(8)
       ..writeByte(0)
-      ..write(obj.operationId)
+      ..write(obj.id)
       ..writeByte(1)
-      ..write(obj.productId)
+      ..write(obj.product)
       ..writeByte(2)
-      ..write(obj.quantity)
+      ..write(obj.operation)
       ..writeByte(3)
-      ..write(obj.sum)
+      ..write(obj.counteragent)
       ..writeByte(4)
-      ..write(obj.counteragent);
+      ..write(obj.quantity)
+      ..writeByte(5)
+      ..write(obj.docDate)
+      ..writeByte(6)
+      ..write(obj.docName)
+      ..writeByte(7)
+      ..write(obj.docNum);
   }
 
   @override

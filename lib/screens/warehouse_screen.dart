@@ -194,14 +194,15 @@ class _WarehouseScreenState extends State<WarehouseScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => ProductScreen(
+                          productId: product.id, // <- обязательный параметр
                           title: product.name,
                           inventoryNumber: product.invNumber,
                           price: product.price,
                           quantity: product.quantity,
                           total: product.sum,
                           categoryPath: categoryName,
-                          images: const [],
-                          history: const [],
+                          images:
+                              const [], // сюда можно передать уже существующие изображения
                         ),
                       ),
                     );

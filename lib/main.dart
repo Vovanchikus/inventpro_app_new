@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:testing_app/models/product_image.dart';
 import 'theme/colors.dart';
 import 'theme/fonts.dart';
 import 'screens/main_screen.dart';
@@ -29,6 +30,7 @@ void main() async {
   Hive.registerAdapter(OperationAdapter());
   Hive.registerAdapter(OperationProductAdapter());
   Hive.registerAdapter(DocumentAdapter());
+  Hive.registerAdapter(ProductImageAdapter());
 
   // Открытие всех Box'ов
   await HiveBoxes.openAll();

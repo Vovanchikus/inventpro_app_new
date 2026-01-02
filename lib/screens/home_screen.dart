@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:testing_app/services/config.dart';
+import 'package:testing_app/services/image_sync_service.dart';
 import '../theme/colors.dart';
 import '../widgets/dashboard_card.dart';
 import '../services/api_service.dart';
@@ -45,7 +47,7 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
-    _apiService = ApiService(baseUrl: 'http://192.168.0.108');
+    _apiService = ApiService(baseUrl: Config.baseUrl);
 
     // Создаем контроллеры для анимации чисел
     _productsController = AnimationController(
@@ -66,6 +68,8 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
 
     _initHiveAndSync();
+    ImageSyncService.removeDeletedFromServer();
+    ImageSyncService.syncAllImages();
   }
 
   Future<void> _initHiveAndSync() async {

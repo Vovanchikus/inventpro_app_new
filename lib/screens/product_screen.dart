@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:testing_app/services/config.dart';
-import 'package:testing_app/services/image_sync_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:collection/collection.dart';
+
 import '../theme/colors.dart';
 import '../boxes/hive_boxes.dart';
 import '../models/product.dart';
@@ -16,8 +18,7 @@ import '../widgets/page_view_images.dart';
 import '../widgets/product/tab_buttons.dart';
 import '../widgets/product/info_tab.dart';
 import '../widgets/product/history_tab.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http;
+import '../services/config.dart';
 
 class ProductScreen extends StatefulWidget {
   final int productId;
@@ -48,11 +49,11 @@ class ProductScreen extends StatefulWidget {
 class _ProductScreenState extends State<ProductScreen> {
   final ScrollController _scrollController = ScrollController();
   final PageController _pageController = PageController();
+
   bool _isStatusBarWhite = false;
   int _activeTab = 0;
   int _activeImageIndex = 0;
 
-  // ✅ Инициализация пустым списком
   List<ProductImage> _images = [];
   bool _loadingImages = true;
 
@@ -64,6 +65,8 @@ class _ProductScreenState extends State<ProductScreen> {
   @override
   void initState() {
     super.initState();
+    print('[PRODUCT SCREEN] initState | productId=${widget.productId}');
+
     _scrollController.addListener(_onScroll);
     _imageBox = Hive.box<ProductImage>(HiveBoxes.productImages);
 
@@ -86,7 +89,9 @@ class _ProductScreenState extends State<ProductScreen> {
   }
 
   void _loadHistory() async {
+    print('[PRODUCT SCREEN] Загрузка истории');
     final box = Hive.box<OperationProduct>(HiveBoxes.operationProducts);
+
     final history = box.values
         .where((op) => op.product?.id == widget.productId)
         .map((op) {
@@ -116,178 +121,224 @@ class _ProductScreenState extends State<ProductScreen> {
       _history = history;
       _loadingHistory = false;
     });
+
+    print('[PRODUCT SCREEN] История загружена: ${history.length}');
   }
 
   Future<void> _loadImages() async {
+    print('[PRODUCT SCREEN] Загрузка изображений из Hive');
+
     final productBox = Hive.box<Product>(HiveBoxes.products);
     final product = productBox.get(widget.productId);
 
     if (product == null) {
-      setState(() {
-        _loadingImages = false;
-      });
+      print('[PRODUCT SCREEN] ❌ Продукт не найден в Hive');
+      setState(() => _loadingImages = false);
       return;
     }
 
-    // Получаем все локальные фото этого продукта
-    final localImages = _imageBox.values
+    _images = _imageBox.values
         .where((img) => img.productId == widget.productId)
         .toList();
 
-    // Серверные URL
-    final serverUrls = product.images
-        .where((url) => url.trim().isNotEmpty && url.startsWith('http'))
-        .toList();
+    print('[PRODUCT SCREEN] Локальных изображений: ${_images.length}');
+    for (final img in _images) {
+      print(
+        '  ├─ local=${img.localPath} | server=${img.serverUrl} | isNew=${img.isNew}',
+      );
+    }
 
-    // Создаём папку продукта
+    setState(() => _loadingImages = false);
+
+    if (_pageController.hasClients) _pageController.jumpToPage(0);
+    _activeImageIndex = 0;
+
+    await _syncImagesFromServer(product);
+  }
+
+  Future<void> _syncImagesFromServer(Product product) async {
+    print('[PRODUCT SCREEN] 🔄 Синхронизация с сервером');
+
     final dir = await getApplicationDocumentsDirectory();
     final productDir = Directory('${dir.path}/products/${widget.productId}');
     if (!productDir.existsSync()) productDir.createSync(recursive: true);
 
-    // 1️⃣ Удаляем локальные фото, которых нет на сервере
-    for (final img in localImages) {
-      if (img.serverUrl != null && !serverUrls.contains(img.serverUrl)) {
-        try {
-          final file = File(img.localPath);
-          if (file.existsSync()) file.deleteSync();
-        } catch (_) {}
-        img.delete();
-        print('Removed local image no longer on server: ${img.localPath}');
-      }
+    final serverUrls = product.images
+        .where((url) => url.trim().isNotEmpty && url.startsWith('http'))
+        .toList();
+
+    print('[PRODUCT SCREEN] Фото на сервере: ${serverUrls.length}');
+    for (final url in serverUrls) {
+      print('  ├─ $url');
     }
 
-    // 2️⃣ Загружаем актуальные локальные фото заново
-    final updatedLocalImages = _imageBox.values
+    // 1️⃣ Удаляем локальные, которых нет на сервере
+    final localImages = _imageBox.values
         .where((img) => img.productId == widget.productId)
         .toList();
 
-    _images = [...updatedLocalImages];
+    for (final img in localImages) {
+      if (img.serverUrl != null && !serverUrls.contains(img.serverUrl)) {
+        print('[PRODUCT SCREEN] 🗑 Удаляем локально: ${img.localPath}');
 
-    // 3️⃣ Добавляем фото с сервера
+        final file = File(img.localPath);
+        if (file.existsSync()) file.deleteSync();
+
+        await img.delete();
+        _images.removeWhere((e) => e.localPath == img.localPath);
+      }
+    }
+
+    // 2️⃣ Скачиваем недостающие
     for (final url in serverUrls) {
-      // Если уже есть в списке, пропускаем
-      if (_images.any((img) => img.serverUrl == url)) continue;
-
       final filename = url.split('/').last;
-      final file = File('${productDir.path}/$filename');
-      bool downloaded = true;
 
-      if (!file.existsSync()) {
-        try {
-          final resp = await http.get(Uri.parse(url));
-          if (resp.statusCode == 200) {
-            await file.writeAsBytes(resp.bodyBytes);
-          } else {
-            print('Error downloading $url: ${resp.statusCode}');
-            downloaded = false;
-          }
-        } catch (e) {
-          print('Exception downloading $url: $e');
-          downloaded = false;
-        }
-      }
-
-      if (downloaded && file.existsSync()) {
-        final serverImg = ProductImage(
-          localPath: file.path,
-          serverUrl: url,
-          productId: widget.productId,
-          isSynced: true,
-          isNew: false,
-        );
-
-        if (!_imageBox.values.any((img) => img.serverUrl == url)) {
-          _imageBox.add(serverImg);
-        }
-
-        _images.add(serverImg);
-      } else {
-        print('Skipped adding image for $url because file not downloaded.');
-      }
-    }
-
-    // 4️⃣ Обновляем состояние
-    setState(() {
-      _loadingImages = false;
-    });
-
-    // 5️⃣ Сбрасываем PageView на первый кадр
-    if (_pageController.hasClients) {
-      _pageController.jumpToPage(0);
-      _activeImageIndex = 0;
-    }
-  }
-
-  Future<void> _addImageFromGallery() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile != null) {
-      final dir = await getApplicationDocumentsDirectory();
-      final productDir = Directory('${dir.path}/products/${widget.productId}');
-      if (!productDir.existsSync()) productDir.createSync(recursive: true);
-
-      final filename = pickedFile.path.split('/').last;
-      final localFile = await File(
-        pickedFile.path,
-      ).copy('${productDir.path}/$filename');
-
-      final newImg = ProductImage(
-        localPath: localFile.path,
-        productId: widget.productId,
-        isSynced: false,
-        isNew: true,
+      final existing = _imageBox.values.firstWhereOrNull(
+        (e) =>
+            e.localPath.split('/').last == filename &&
+            e.productId == widget.productId,
       );
 
-      _imageBox.add(newImg);
+      if (existing != null) {
+        print('[PRODUCT SCREEN] ⏭ Уже есть локально: $filename');
+        existing.serverUrl = url;
+        existing.isSynced = true;
+        existing.isNew = false;
+        await existing.save();
 
-      setState(() {
-        _images.add(newImg);
-        _activeImageIndex = _images.length - 1;
-        if (_pageController.hasClients) {
-          _pageController.jumpToPage(_activeImageIndex);
+        if (!_images.contains(existing)) _images.add(existing);
+        continue;
+      }
+
+      print('[PRODUCT SCREEN] ⬇ Скачиваем с сервера: $filename');
+
+      final file = File('${productDir.path}/$filename');
+      try {
+        final resp = await http.get(Uri.parse(url));
+        if (resp.statusCode == 200) {
+          await file.writeAsBytes(resp.bodyBytes);
+
+          final serverImg = ProductImage(
+            localPath: file.path,
+            serverUrl: url,
+            productId: widget.productId,
+            isSynced: true,
+            isNew: false,
+            uploadProgress: 1.0,
+          );
+
+          await _imageBox.add(serverImg);
+          _images.add(serverImg);
+
+          print('[PRODUCT SCREEN] ✅ Скачано: ${file.path}');
         }
-      });
-
-      await _uploadImageToServer(newImg);
+      } catch (e) {
+        print('[PRODUCT SCREEN] ❌ Ошибка скачивания: $e');
+      }
     }
+
+    if (mounted) setState(() {});
   }
 
   Future<void> _uploadImageToServer(ProductImage img) async {
+    print('[PRODUCT SCREEN] ⬆ Загрузка на сервер: ${img.localPath}');
+
+    if (img.serverUrl != null) {
+      print('[PRODUCT SCREEN] ⏭ Уже загружено, пропуск');
+      return;
+    }
+
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
       final request = http.MultipartRequest('POST', uri);
-
       request.fields['product_id'] = img.productId.toString();
-      request.files.add(
-        await http.MultipartFile.fromPath('file', img.localPath),
-      );
 
-      final resp = await request.send();
-      final respBody = await resp.stream.bytesToString();
+      final file = await http.MultipartFile.fromPath('file', img.localPath);
+      request.files.add(file);
 
-      if (resp.statusCode == 200) {
+      final streamedResponse = await request.send();
+      final respBytes = await streamedResponse.stream.toBytes();
+      final respBody = utf8.decode(respBytes);
+
+      if (streamedResponse.statusCode == 200) {
         final data = jsonDecode(respBody);
 
-        setState(() {
+        final serverUrl = data['data']?['serverUrl'];
+
+        if (serverUrl != null && serverUrl.toString().isNotEmpty) {
+          img.serverUrl = serverUrl;
           img.isSynced = true;
           img.isNew = false;
-          if (data['success'] == true && data['data']?['serverUrl'] != null) {
-            img.serverUrl = data['data']['serverUrl'];
-          }
-        });
 
-        if (img.isInBox) img.save();
+          print('🟢 [UPLOAD] УСПЕХ');
+          print('   productId: ${img.productId}');
+          print('   localPath: ${img.localPath}');
+          print('   serverUrl: $serverUrl');
+        } else {
+          print('🟠 [UPLOAD] ВНИМАНИЕ: serverUrl не получен');
+          print('   productId: ${img.productId}');
+          print('   localPath: ${img.localPath}');
+
+          img.isSynced = false;
+          img.isNew = true; // 🔥 ОСТАЁТСЯ новым
+        }
+
+        await img.save();
+
+        print('[PRODUCT SCREEN] ✅ Загружено, serverUrl=${img.serverUrl}');
       } else {
-        print('Error uploading image: ${resp.statusCode}');
+        print('[PRODUCT SCREEN] ❌ Ошибка загрузки: $respBody');
       }
     } catch (e) {
-      print('Exception during upload: $e');
+      print('[PRODUCT SCREEN] ❌ Исключение загрузки: $e');
     }
+
+    setState(() {});
+  }
+
+  Future<void> _addImageFromGallery() async {
+    print('[PRODUCT SCREEN] 📸 Выбор изображения из галереи');
+
+    final pickedFile = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+    );
+    if (pickedFile == null) return;
+
+    final dir = await getApplicationDocumentsDirectory();
+    final productDir = Directory('${dir.path}/products/${widget.productId}');
+    if (!productDir.existsSync()) productDir.createSync(recursive: true);
+
+    final filename = pickedFile.path.split('/').last;
+    final localFile = await File(
+      pickedFile.path,
+    ).copy('${productDir.path}/$filename');
+
+    final newImg = ProductImage(
+      localPath: localFile.path,
+      productId: widget.productId,
+      isSynced: false,
+      isNew: true,
+      uploadProgress: 0.0,
+    );
+
+    await _imageBox.add(newImg);
+
+    print('[PRODUCT SCREEN] ➕ Добавлено локально: ${newImg.localPath}');
+
+    setState(() {
+      _images.add(newImg);
+      _activeImageIndex = _images.length - 1;
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_activeImageIndex);
+      }
+    });
+
+    _uploadImageToServer(newImg);
   }
 
   @override
   void dispose() {
+    print('[PRODUCT SCREEN] dispose');
     _scrollController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -306,7 +357,7 @@ class _ProductScreenState extends State<ProductScreen> {
             physics: const BouncingScrollPhysics(),
             child: Column(
               children: [
-                SizedBox(height: 300),
+                const SizedBox(height: 300),
                 Container(
                   decoration: BoxDecoration(
                     color: AppColors.bgApp,
@@ -352,8 +403,6 @@ class _ProductScreenState extends State<ProductScreen> {
               ],
             ),
           ),
-
-          // ✅ PageView с индикатором загрузки
           Positioned(
             top: 0,
             left: 0,
@@ -370,7 +419,6 @@ class _ProductScreenState extends State<ProductScreen> {
                     onAddImage: _addImageFromGallery,
                   ),
           ),
-
           BackButtonWidget(topPadding: topPadding),
         ],
       ),

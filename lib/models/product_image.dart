@@ -19,11 +19,15 @@ class ProductImage extends HiveObject {
   @HiveField(4)
   int productId; // добавляем привязку к продукту
 
+  @HiveField(5)
+  double uploadProgress;
+
   ProductImage({
     required this.localPath,
     this.serverUrl,
     this.isSynced = false,
     this.isNew = true,
     required this.productId,
+    this.uploadProgress = 0.0,
   });
 }

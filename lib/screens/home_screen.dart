@@ -16,7 +16,6 @@ import '../models/operation.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
-  /// Публичный GlobalKey для MainScreen
   static final GlobalKey<HomeScreenState> globalKey =
       GlobalKey<HomeScreenState>();
 
@@ -28,19 +27,16 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late ApiService _apiService;
   bool _loading = true;
 
-  // Количество элементов для карточек
   int _productsCount = 0;
   int _operationsCount = 0;
   int _documentsCount = 0;
   int _categoriesCount = 0;
 
-  // Анимации чисел
   late final AnimationController _productsController;
   late final AnimationController _operationsController;
   late final AnimationController _documentsController;
   late final AnimationController _categoriesController;
 
-  // Автосинхронизация один раз
   static bool _hasSynced = false;
 
   @override
@@ -49,7 +45,6 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     _apiService = ApiService(baseUrl: Config.baseUrl);
 
-    // Создаем контроллеры для анимации чисел
     _productsController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -68,12 +63,10 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
 
     _initHiveAndSync();
-    ImageSyncService.removeDeletedFromServer();
     ImageSyncService.syncAllImages();
   }
 
   Future<void> _initHiveAndSync() async {
-    // Открываем все боксы параллельно
     await Future.wait([
       if (!Hive.isBoxOpen(HiveBoxes.products))
         Hive.openBox<Product>(HiveBoxes.products),
@@ -87,12 +80,12 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         Hive.openBox(HiveBoxes.operationTypes),
       if (!Hive.isBoxOpen(HiveBoxes.operationProducts))
         Hive.openBox(HiveBoxes.operationProducts),
+      if (!Hive.isBoxOpen(HiveBoxes.productImages))
+        Hive.openBox(HiveBoxes.productImages),
     ]);
 
-    // Сразу обновляем количество из локального хранилища
     _updateCounts();
 
-    // Автосинхронизация только один раз при первом запуске
     if (!_hasSynced) {
       _hasSynced = true;
       _syncData();
@@ -101,7 +94,6 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  /// Метод для синхронизации данных с сервером
   Future<void> _syncData() async {
     setState(() => _loading = true);
 
@@ -139,7 +131,6 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  /// Вызов ручной синхронизации
   Future<void> manualSync() async => await _syncData();
 
   void _updateCounts() {
@@ -191,7 +182,6 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     controller.forward();
   }
 
-  /// Плавная анимация появления карточек (staggered)
   Widget _animatedCard(Widget card, int index) {
     return TweenAnimationBuilder<double>(
       duration: Duration(milliseconds: 300 + index * 120),

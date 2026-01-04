@@ -22,13 +22,14 @@ class ProductImageAdapter extends TypeAdapter<ProductImage> {
       isSynced: fields[2] as bool,
       isNew: fields[3] as bool,
       productId: fields[4] as int,
+      uploadProgress: fields[5] as double,
     );
   }
 
   @override
   void write(BinaryWriter writer, ProductImage obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.localPath)
       ..writeByte(1)
@@ -38,7 +39,9 @@ class ProductImageAdapter extends TypeAdapter<ProductImage> {
       ..writeByte(3)
       ..write(obj.isNew)
       ..writeByte(4)
-      ..write(obj.productId);
+      ..write(obj.productId)
+      ..writeByte(5)
+      ..write(obj.uploadProgress);
   }
 
   @override

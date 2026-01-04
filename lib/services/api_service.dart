@@ -1,3 +1,4 @@
+// api_service.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -25,15 +26,12 @@ class ApiService {
           (X509Certificate cert, String host, int port) => true;
   }
 
-  /// Универсальный GET-запрос с таймаутом подключения
-  /// noTimeout == true => не ограничиваем таймаут
   Future<List<dynamic>> _get(
     String endpoint, {
     Duration? timeout,
     bool noTimeout = false,
   }) async {
     final url = Uri.parse('$baseUrl/api/$endpoint');
-
     final effectiveTimeout = (noTimeout
         ? null
         : (timeout ?? const Duration(seconds: 5)));
@@ -69,117 +67,73 @@ class ApiService {
     }
   }
 
-  /// ==========================
-  /// Полная синхронизация с таймаутом подключения
-  /// ==========================
   Future<SyncStatus> syncAll() async {
-    // Таймаут только на проверку доступности сервера
     const connectTimeout = Duration(seconds: 5);
 
     try {
       await _get('categories', timeout: connectTimeout);
     } on TimeoutException catch (_) {
-      debugPrint('[ApiService] Синхронизация отменена: сервер недоступен');
+      debugPrint('[ApiService] Сервер недоступен');
       return SyncStatus.error;
     } catch (e) {
-      debugPrint('[ApiService] Ошибка при проверке сервера: $e');
+      debugPrint('[ApiService] Ошибка проверки сервера: $e');
       return SyncStatus.error;
     }
 
-    // Если сервер доступен, запускаем обычную последовательную синхронизацию без таймаута
     try {
       await _syncAllInternal(noTimeout: true);
       return SyncStatus.success;
     } catch (e) {
-      debugPrint('[ApiService] Ошибка при syncAll: $e');
+      debugPrint('[ApiService] Ошибка syncAll: $e');
       return SyncStatus.error;
     }
   }
 
-  /// Внутренняя последовательная синхронизация всех сущностей
   Future<void> _syncAllInternal({bool noTimeout = false}) async {
-    try {
-      await syncCategories(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncCategories: $e');
-    }
-    try {
-      await syncOperationTypes(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncOperationTypes: $e');
-    }
-    try {
-      await syncProducts(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncProducts: $e');
-    }
-    try {
-      await syncOperations(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncOperations: $e');
-    }
-    try {
-      await syncOperationProducts(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncOperationProducts: $e');
-    }
-    try {
-      await syncDocuments(noTimeout: noTimeout);
-    } catch (e) {
-      debugPrint('Ошибка syncDocuments: $e');
-    }
-
-    debugPrint('[ApiService] Полная синхронизация завершена');
+    await syncCategories(noTimeout: noTimeout);
+    await syncOperationTypes(noTimeout: noTimeout);
+    await syncProducts(noTimeout: noTimeout);
+    await syncOperations(noTimeout: noTimeout);
+    await syncOperationProducts(noTimeout: noTimeout);
+    await syncDocuments(noTimeout: noTimeout);
   }
 
-  /// ==========================
-  /// Категории (рекурсивно)
-  /// ==========================
-  Future<int> _saveCategoriesRecursive(
-    List<dynamic> data,
-    Box<Category> box, [
-    int? parentId,
-  ]) async {
-    int updated = 0;
-    for (var item in data) {
-      final category = Category(
-        id: item['id'] ?? 0,
-        name: item['name']?.toString() ?? '',
-        parentId: parentId,
-        slug: item['slug']?.toString() ?? '',
-        deleted: false,
-      );
-
-      final existing = box.get(category.id);
-      if (existing == null ||
-          existing.name != category.name ||
-          existing.parentId != category.parentId) {
-        box.put(category.id, category);
-        updated++;
-      }
-
-      if (item['children'] != null && item['children'] is List) {
-        updated += await _saveCategoriesRecursive(
-          item['children'],
-          box,
-          category.id,
-        );
-      }
-    }
-    return updated;
-  }
-
+  // ----------------------- Категории -----------------------
   Future<int> syncCategories({bool noTimeout = false}) async {
     final data = await _get('categories', noTimeout: noTimeout);
     final box = Hive.box<Category>(HiveBoxes.categories);
-    int updated = await _saveCategoriesRecursive(data, box);
-    debugPrint('[ApiService] Категории синхронизированы: $updated');
+    int updated = 0;
+
+    Future<int> _saveRecursive(List<dynamic> items, int? parentId) async {
+      int count = 0;
+      for (var item in items) {
+        final category = Category(
+          id: item['id'] ?? 0,
+          name: item['name']?.toString() ?? '',
+          parentId: parentId,
+          slug: item['slug']?.toString() ?? '',
+          deleted: false,
+        );
+        final existing = box.get(category.id);
+        if (existing == null ||
+            existing.name != category.name ||
+            existing.parentId != category.parentId) {
+          box.put(category.id, category);
+          count++;
+        }
+        if (item['children'] != null && item['children'] is List) {
+          count += await _saveRecursive(item['children'], category.id);
+        }
+      }
+      return count;
+    }
+
+    updated = await _saveRecursive(data, null);
+    debugPrint('[ApiService] Категории обновлены: $updated');
     return updated;
   }
 
-  /// ==========================
-  /// Продукты
-  /// ==========================
+  // ----------------------- Продукты -----------------------
   Future<int> syncProducts({bool noTimeout = false}) async {
     final data = await _get('products', noTimeout: noTimeout);
     final box = Hive.box<Product>(HiveBoxes.products);
@@ -191,9 +145,9 @@ class ApiService {
         name: item['name']?.toString() ?? '',
         invNumber: item['inv_number']?.toString() ?? '',
         unit: item['unit']?.toString() ?? '',
-        quantity: double.tryParse(item['quantity']?.toString() ?? '') ?? 0,
-        price: double.tryParse(item['price']?.toString() ?? '') ?? 0,
-        sum: double.tryParse(item['sum']?.toString() ?? '') ?? 0,
+        quantity: double.tryParse(item['quantity']?.toString() ?? '0') ?? 0,
+        price: double.tryParse(item['price']?.toString() ?? '0') ?? 0,
+        sum: double.tryParse(item['sum']?.toString() ?? '0') ?? 0,
         categoryId: item['category_id'] ?? 0,
         updatedAt:
             DateTime.tryParse(item['updated_at']?.toString() ?? '') ??
@@ -202,7 +156,9 @@ class ApiService {
             DateTime.tryParse(item['created_at']?.toString() ?? '') ??
             DateTime.now(),
         images: item['images'] != null && item['images'] is List
-            ? List<String>.from(item['images'])
+            ? (item['images'] as List)
+                  .map((i) => i is String ? i : i['url']?.toString() ?? '')
+                  .toList()
             : [],
       );
 
@@ -212,19 +168,26 @@ class ApiService {
           existing.quantity != product.quantity ||
           existing.price != product.price ||
           existing.sum != product.sum ||
-          existing.categoryId != product.categoryId) {
+          existing.categoryId != product.categoryId ||
+          !_listEquals(existing.images, product.images)) {
         box.put(product.id, product);
         updated++;
       }
     }
 
-    debugPrint('[ApiService] Продукты синхронизированы: $updated');
+    debugPrint('[ApiService] Продукты обновлены: $updated');
     return updated;
   }
 
-  /// ==========================
-  /// Типы операций
-  /// ==========================
+  bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  // ----------------------- Типы операций -----------------------
   Future<int> syncOperationTypes({bool noTimeout = false}) async {
     final data = await _get('operation-types', noTimeout: noTimeout);
     final box = Hive.box<OperationType>(HiveBoxes.operationTypes);
@@ -242,13 +205,11 @@ class ApiService {
       }
     }
 
-    debugPrint('[ApiService] Типы операций синхронизированы: $updated');
+    debugPrint('[ApiService] Типы операций обновлены: $updated');
     return updated;
   }
 
-  /// ==========================
-  /// Операции
-  /// ==========================
+  // ----------------------- Операции -----------------------
   Future<int> syncOperations({bool noTimeout = false}) async {
     final data = await _get('operations', noTimeout: noTimeout);
     final box = Hive.box<Operation>(HiveBoxes.operations);
@@ -273,13 +234,11 @@ class ApiService {
       }
     }
 
-    debugPrint('[ApiService] Операции синхронизированы: $updated');
+    debugPrint('[ApiService] Операции обновлены: $updated');
     return updated;
   }
 
-  /// ==========================
-  /// История операций (OperationProducts)
-  /// ==========================
+  // ----------------------- OperationProducts -----------------------
   Future<int> syncOperationProducts({bool noTimeout = false}) async {
     final data = await _get('history', noTimeout: noTimeout);
     final box = Hive.box<OperationProduct>(HiveBoxes.operationProducts);
@@ -289,18 +248,12 @@ class ApiService {
       DateTime? docDate;
       final docDateStr = item['doc_date']?.toString();
       if (docDateStr != null && docDateStr.isNotEmpty) {
-        try {
-          docDate = DateFormat('dd.MM.yyyy').parse(docDateStr);
-        } catch (e) {
-          debugPrint(
-            '[syncOperationProducts] Ошибка парсинга doc_date: $docDateStr',
-          );
-        }
+        docDate = DateFormat('dd.MM.yyyy').parse(docDateStr);
       }
 
       final opProduct = OperationProduct(
         id: item['id'] ?? 0,
-        product: item['product'] != null
+        product: item['product'] != null && item['product'] is Map
             ? Product(
                 id: item['product']['id'] ?? 0,
                 name: item['product']['name'] ?? '',
@@ -313,17 +266,21 @@ class ApiService {
                     ) ??
                     0,
                 sum: 0,
-                categoryId: 0,
+                categoryId: item['product']['category_id'] ?? 0,
                 updatedAt: DateTime.now(),
                 createdAt: DateTime.now(),
                 images:
                     item['product']['images'] != null &&
                         item['product']['images'] is List
-                    ? List<String>.from(item['product']['images'])
+                    ? (item['product']['images'] as List)
+                          .map(
+                            (i) => i is String ? i : i['url']?.toString() ?? '',
+                          )
+                          .toList()
                     : [],
               )
             : null,
-        operation: item['operation'] != null
+        operation: item['operation'] != null && item['operation'] is Map
             ? Operation(
                 id: item['operation']['id'] ?? 0,
                 typeId: item['operation']['type']?['id'] ?? 0,
@@ -348,13 +305,11 @@ class ApiService {
       }
     }
 
-    debugPrint('[ApiService] OperationProducts синхронизированы: $updated');
+    debugPrint('[ApiService] OperationProducts обновлены: $updated');
     return updated;
   }
 
-  /// ==========================
-  /// Документы
-  /// ==========================
+  // ----------------------- Документы -----------------------
   Future<int> syncDocuments({bool noTimeout = false}) async {
     final data = await _get('documents', noTimeout: noTimeout);
     final box = Hive.box<Document>(HiveBoxes.documents);
@@ -380,7 +335,7 @@ class ApiService {
       }
     }
 
-    debugPrint('[ApiService] Документы синхронизированы: $updated');
+    debugPrint('[ApiService] Документы обновлены: $updated');
     return updated;
   }
 }

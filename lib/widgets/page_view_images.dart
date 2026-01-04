@@ -2,8 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../models/product_image.dart';
 import '../../theme/colors.dart';
 
@@ -48,30 +46,50 @@ class PageViewImages extends StatelessWidget {
               final isLocalFile =
                   img.localPath.isNotEmpty && File(img.localPath).existsSync();
 
-              return isLocalFile
-                  ? Image.file(
-                      File(img.localPath),
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    )
-                  : (img.serverUrl != null
-                        ? CachedNetworkImage(
-                            imageUrl: img.serverUrl!,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                            errorWidget: (context, url, error) => const Icon(
-                              Icons.error,
-                              size: 60,
-                              color: Colors.red,
-                            ),
-                          )
-                        : const SizedBox.shrink());
+              Widget imageWidget;
+
+              if (isLocalFile) {
+                imageWidget = Image.file(
+                  File(img.localPath),
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                );
+              } else if (img.serverUrl != null) {
+                imageWidget = CachedNetworkImage(
+                  imageUrl: img.serverUrl!,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) =>
+                      const Center(child: CircularProgressIndicator()),
+                  errorWidget: (context, url, error) =>
+                      const Icon(Icons.error, size: 60, color: Colors.red),
+                );
+              } else {
+                imageWidget = const SizedBox.shrink();
+              }
+
+              return Stack(
+                children: [
+                  Positioned.fill(child: imageWidget),
+
+                  // Прогресс загрузки только для локальных новых фото
+                  if (img.isNew && img.uploadProgress < 1.0)
+                    Positioned(
+                      bottom: 16,
+                      left: 16,
+                      right: 16,
+                      child: LinearProgressIndicator(
+                        value: img.uploadProgress,
+                        color: AppColors.brand,
+                        backgroundColor: Colors.white.withOpacity(0.5),
+                      ),
+                    ),
+                ],
+              );
             },
           ),
 
+          // Индикатор точек для нескольких фото
           if (images.length > 1)
             Positioned(
               bottom: 16,
@@ -95,6 +113,7 @@ class PageViewImages extends StatelessWidget {
               ),
             ),
 
+          // Кнопка добавления фото
           Positioned(
             bottom: 16,
             right: 12,

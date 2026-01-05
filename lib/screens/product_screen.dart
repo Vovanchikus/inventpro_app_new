@@ -258,21 +258,38 @@ class _ProductScreenState extends State<ProductScreen> {
 
     final dir = await getApplicationDocumentsDirectory();
     final productDir = Directory('${dir.path}/products/${widget.productId}');
-    if (!productDir.existsSync()) productDir.createSync(recursive: true);
+    if (!productDir.existsSync()) await productDir.create(recursive: true);
 
     final filename = pickedFile.path.split('/').last;
-    final localFile = await File(
-      pickedFile.path,
-    ).copy('${productDir.path}/$filename');
+    final destPath = '${productDir.path}/$filename';
+
+    // Копируем файл только если его там ещё нет
+    final localFile = File(pickedFile.path);
+    final file = File(destPath);
+
+    try {
+      if (!file.existsSync()) {
+        await localFile.copy(destPath);
+        print('[LOCAL] Файл скопирован: $destPath');
+      } else {
+        print('[LOCAL] Файл уже существует: $destPath');
+      }
+    } catch (e) {
+      print('[LOCAL] ❌ Ошибка копирования файла: $e');
+      return; // если копирование не удалось, не добавляем в UI
+    }
 
     final newImg = ProductImage(
-      localPath: localFile.path,
+      localPath: destPath,
       productId: widget.productId,
       isSynced: false,
       isNew: true,
     );
 
+    // Сначала сохраняем в Hive
     await _imageBox.add(newImg);
+
+    // После успешного сохранения добавляем в UI
     setState(() {
       _images.add(newImg);
       _activeImageIndex = _images.length - 1;
@@ -281,40 +298,69 @@ class _ProductScreenState extends State<ProductScreen> {
       }
     });
 
+    // Начинаем загрузку на сервер
     _uploadImageToServer(newImg);
   }
 
   Future<void> _uploadImageToServer(ProductImage img) async {
-    if (img.isSynced && img.serverUrl != null) return;
+    if (img.isSynced || img.isUploading) return;
+
+    img.isUploading = true;
+    await img.save();
 
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
       final request = http.MultipartRequest('POST', uri);
-      request.fields['product_id'] = img.productId.toString();
+
+      request.fields.addAll({
+        'product_id': img.productId.toString(),
+        'client_id': img.clientId, // уникальный ID для клиента
+      });
+
       request.files.add(
         await http.MultipartFile.fromPath('file', img.localPath),
       );
 
-      final streamedResponse = await request.send();
-      final respBytes = await streamedResponse.stream.toBytes();
-      final respBody = utf8.decode(respBytes);
+      final streamed = await request.send();
+      final body = await streamed.stream.bytesToString();
 
-      if (streamedResponse.statusCode == 200) {
-        final data = jsonDecode(respBody);
-        final serverUrl = data['data']?['serverUrl'];
-        if (serverUrl != null && serverUrl.toString().isNotEmpty) {
+      if (streamed.statusCode == 200) {
+        final json = jsonDecode(body);
+        final serverUrl = json['data']?['serverUrl'] ?? json['data']?['url'];
+
+        if (serverUrl != null) {
           img.serverUrl = serverUrl;
           img.isSynced = true;
           img.isNew = false;
+          img.uploadProgress = 1.0;
           await img.save();
-          if (!_images.contains(img)) _images.add(img);
+
+          print('[UPLOAD] ✅ Загружено на сервер: $serverUrl');
+
+          // 🔹 Синхронизация с продуктом
+          final product = _productBox.get(img.productId);
+          if (product != null && !product.images.contains(serverUrl)) {
+            product.images = [...product.images, serverUrl];
+            await _productBox.put(product.id, product);
+          }
+
+          // 🔹 Обновление UI сразу
+          if (!_images.contains(img)) {
+            _images.add(img);
+          }
+          setState(() {});
+        } else {
+          print('[UPLOAD] ❌ serverUrl не вернулся');
         }
+      } else {
+        print('[UPLOAD] ❌ HTTP ${streamed.statusCode}');
       }
     } catch (e) {
-      print('[PRODUCT SCREEN] ❌ Исключение загрузки: $e');
+      print('[UPLOAD] ❌ Ошибка загрузки: $e');
+    } finally {
+      img.isUploading = false;
+      await img.save();
     }
-
-    setState(() {});
   }
 
   @override

@@ -73,15 +73,24 @@ class PageViewImages extends StatelessWidget {
                   Positioned.fill(child: imageWidget),
 
                   // Прогресс загрузки только для локальных новых фото
-                  if (img.isNew && img.uploadProgress < 1.0)
-                    Positioned(
-                      bottom: 16,
-                      left: 16,
-                      right: 16,
-                      child: LinearProgressIndicator(
-                        value: img.uploadProgress,
-                        color: AppColors.brand,
-                        backgroundColor: Colors.white.withOpacity(0.5),
+                  // ⏳ Круглый индикатор загрузки (как в Telegram)
+                  if (img.isNew && !img.isSynced)
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black45,
+                        child: Center(
+                          child: SizedBox(
+                            width: 56,
+                            height: 56,
+                            child: CircularProgressIndicator(
+                              value: img.uploadProgress > 0
+                                  ? img.uploadProgress
+                                  : null,
+                              strokeWidth: 4,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                 ],

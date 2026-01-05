@@ -80,43 +80,62 @@ class ImageSyncService {
     ProductImage img,
     Box<Product> productBox,
   ) async {
-    if (img.isSynced == true && img.serverUrl != null) {
+    if (img.isSynced && img.serverUrl != null) {
       print('[UPLOAD] ⏭ Уже загружено: ${img.localPath}');
       return;
     }
 
     print('[UPLOAD] Старт загрузки: ${img.localPath}');
+    img.isUploading = true;
+    img.uploadProgress = 0.0;
+    await img.save();
 
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
       final request = http.MultipartRequest('POST', uri);
+
+      // ✅ Используем clientId из модели
       request.fields['product_id'] = img.productId.toString();
+      request.fields['client_id'] = img.clientId;
+
+      // ⚡ Имя файла должно быть "file", если сервер ожидает
       request.files.add(
         await http.MultipartFile.fromPath('file', img.localPath),
       );
 
-      final response = await request.send();
-      final body = utf8.decode(await response.stream.toBytes());
+      final streamed = await request.send();
+      final body = await streamed.stream.bytesToString();
 
-      if (response.statusCode != 200) {
-        print('[UPLOAD] ❌ Ошибка HTTP ${response.statusCode}');
+      print('[UPLOAD] HTTP ${streamed.statusCode}: $body');
+
+      if (streamed.statusCode != 200) {
+        print('[UPLOAD] ❌ Ошибка HTTP ${streamed.statusCode}');
+        img.isUploading = false;
+        await img.save();
         return;
       }
 
       final json = jsonDecode(body);
       final serverUrl = json['data']?['url'] ?? json['data']?['serverUrl'];
+
       if (serverUrl == null) {
         print('[UPLOAD] ❌ serverUrl не вернулся');
+        img.isUploading = false;
+        await img.save();
         return;
       }
 
+      // ✅ Обновляем модель
       img.serverUrl = serverUrl;
       img.isSynced = true;
       img.isNew = false;
+      img.uploadProgress = 1.0;
+      img.isUploading = false;
       await img.save();
 
       print('[UPLOAD] ✅ Загружено на сервер: $serverUrl');
 
+      // Добавляем в продукт
       final product = productBox.get(img.productId);
       if (product != null && !product.images.contains(serverUrl)) {
         product.images = [...product.images, serverUrl];
@@ -124,6 +143,9 @@ class ImageSyncService {
       }
     } catch (e) {
       print('[UPLOAD] ❌ Исключение: $e');
+      img.isUploading = false;
+      img.uploadProgress = 0.0;
+      await img.save();
     }
   }
 

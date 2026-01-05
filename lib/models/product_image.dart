@@ -1,4 +1,5 @@
 import 'package:hive/hive.dart';
+import 'package:uuid/uuid.dart';
 
 part 'product_image.g.dart';
 
@@ -17,10 +18,16 @@ class ProductImage extends HiveObject {
   bool isNew;
 
   @HiveField(4)
-  int productId; // добавляем привязку к продукту
+  int productId;
 
   @HiveField(5)
   double uploadProgress;
+
+  @HiveField(6)
+  String clientId; // 🔑 уникальный ID
+
+  @HiveField(7)
+  bool isUploading; // защита от повторной отправки
 
   ProductImage({
     required this.localPath,
@@ -29,5 +36,7 @@ class ProductImage extends HiveObject {
     this.isNew = true,
     required this.productId,
     this.uploadProgress = 0.0,
-  });
+    String? clientId,
+    this.isUploading = false,
+  }) : clientId = clientId ?? const Uuid().v4();
 }

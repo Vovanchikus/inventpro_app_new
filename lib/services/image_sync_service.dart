@@ -31,10 +31,7 @@ class ImageSyncService {
     );
 
     for (final img in unsynced) {
-      _uploadImage(
-        img,
-        productBox,
-      ); // 🔄 Запускаем без await, чтобы работало как очередь
+      _uploadImage(img, productBox);
     }
 
     print('================ IMAGE SYNC FINISHED ================');
@@ -44,6 +41,16 @@ class ImageSyncService {
   static Future<void> addLocalImage(File file, int productId) async {
     final box = Hive.box<ProductImage>(HiveBoxes.productImages);
     final productBox = Hive.box<Product>(HiveBoxes.products);
+
+    // Проверяем дубликаты по локальному пути
+    final exists = box.values.any(
+      (e) => e.localPath == file.path && e.productId == productId,
+    );
+
+    if (exists) {
+      print('[LOCAL] ⏭ Изображение уже есть локально: ${file.path}');
+      return;
+    }
 
     final img = ProductImage(
       productId: productId,
@@ -55,19 +62,16 @@ class ImageSyncService {
 
     await box.add(img);
 
-    // Добавляем в продукт сразу (для отображения)
+    // Добавляем в продукт для совместимости
     final product = productBox.get(productId);
-    if (product != null) {
-      product.images = [
-        ...product.images,
-        file.path,
-      ]; // локальный путь добавляем
+    if (product != null && !product.images.contains(file.path)) {
+      product.images = [...product.images, file.path];
       await productBox.put(product.id, product);
     }
 
     print('[LOCAL] Фото добавлено локально: ${file.path}');
 
-    // 🔄 Запускаем асинхронную загрузку в фоне
+    // 🔄 Запускаем асинхронную загрузку
     _uploadImage(img, productBox);
   }
 
@@ -76,9 +80,8 @@ class ImageSyncService {
     ProductImage img,
     Box<Product> productBox,
   ) async {
-    // 🔒 Защита от повторной загрузки
     if (img.isSynced == true && img.serverUrl != null) {
-      print('[UPLOAD] ⏭ Уже загружено, пропуск: ${img.localPath}');
+      print('[UPLOAD] ⏭ Уже загружено: ${img.localPath}');
       return;
     }
 
@@ -87,7 +90,6 @@ class ImageSyncService {
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
       final request = http.MultipartRequest('POST', uri);
-
       request.fields['product_id'] = img.productId.toString();
       request.files.add(
         await http.MultipartFile.fromPath('file', img.localPath),
@@ -116,13 +118,9 @@ class ImageSyncService {
       print('[UPLOAD] ✅ Загружено на сервер: $serverUrl');
 
       final product = productBox.get(img.productId);
-      if (product != null) {
-        // Заменяем локальный путь на serverUrl, но локальный путь остаётся для отображения
-        if (!product.images.contains(serverUrl)) {
-          product.images = [...product.images, serverUrl];
-          await productBox.put(product.id, product);
-          print('[UPLOAD] 🧩 Обновлён Product.images');
-        }
+      if (product != null && !product.images.contains(serverUrl)) {
+        product.images = [...product.images, serverUrl];
+        await productBox.put(product.id, product);
       }
     } catch (e) {
       print('[UPLOAD] ❌ Исключение: $e');
@@ -155,10 +153,6 @@ class ImageSyncService {
       final int productId = product['id'];
       final List images = product['images'] ?? [];
 
-      print(
-        '[SERVER SYNC] Товар $productId | Фото на сервере: ${images.length}',
-      );
-
       for (final img in images) {
         final serverUrl = img['url'];
         if (serverUrl == null) continue;
@@ -175,12 +169,12 @@ class ImageSyncService {
           continue;
         }
 
-        print('[SERVER SYNC] ⬇ Скачиваем новое изображение: $serverUrl');
+        print('[SERVER SYNC] ⬇ Скачиваем: $serverUrl');
         await _downloadImage(productId, serverUrl, box, productBox);
       }
     }
 
-    // Проверяем удалённые изображения
+    // Проверка удалённых изображений
     for (final img in box.values.toList()) {
       if (img.serverUrl == null) continue;
 
@@ -194,18 +188,14 @@ class ImageSyncService {
         print('[SERVER SYNC] 🗑 Удалено на сервере: ${img.serverUrl}');
 
         final file = File(img.localPath);
-        if (file.existsSync()) {
-          file.deleteSync();
-          print('[SERVER SYNC] 🗑 Файл удалён локально');
-        }
+        if (file.existsSync()) file.deleteSync();
 
         await img.delete();
 
         final product = productBox.get(img.productId);
         if (product != null) {
           product.images.remove(img.serverUrl);
-          productBox.put(product.id, product);
-          print('[SERVER SYNC] 🧩 Product.images обновлён');
+          await productBox.put(product.id, product);
         }
       }
     }
@@ -221,13 +211,30 @@ class ImageSyncService {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final productDir = Directory('${dir.path}/product_images/$productId');
-
-      if (!productDir.existsSync()) {
-        productDir.createSync(recursive: true);
-      }
+      if (!productDir.existsSync()) productDir.createSync(recursive: true);
 
       final fileName = serverUrl.split('/').last;
       final filePath = '${productDir.path}/$fileName';
+
+      // Проверяем локально дубликаты
+      final existing = box.values.firstWhere(
+        (e) =>
+            e.productId == productId && e.localPath.split('/').last == fileName,
+        orElse: () => ProductImage(
+          productId: -1,
+          localPath: '',
+          isNew: false,
+          isSynced: true,
+        ),
+      );
+      if (existing.productId != -1) {
+        print('[DOWNLOAD] ⏭ Уже есть локально: $fileName');
+        existing.serverUrl = serverUrl;
+        existing.isSynced = true;
+        existing.isNew = false;
+        await existing.save();
+        return;
+      }
 
       final resp = await http.get(Uri.parse(serverUrl));
       if (resp.statusCode != 200) {
@@ -248,14 +255,13 @@ class ImageSyncService {
 
       await box.add(img);
 
-      print('[DOWNLOAD] ✅ Скачано: $filePath');
-
       final product = productBox.get(productId);
       if (product != null && !product.images.contains(serverUrl)) {
         product.images = [...product.images, serverUrl];
-        productBox.put(product.id, product);
-        print('[DOWNLOAD] 🧩 Product.images обновлён');
+        await productBox.put(product.id, product);
       }
+
+      print('[DOWNLOAD] ✅ Скачано: $filePath');
     } catch (e) {
       print('[DOWNLOAD] ❌ Исключение: $e');
     }

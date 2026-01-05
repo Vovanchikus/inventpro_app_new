@@ -63,7 +63,6 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
 
     _initHiveAndSync();
-    ImageSyncService.syncAllImages();
   }
 
   Future<void> _initHiveAndSync() async {
@@ -86,19 +85,25 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     _updateCounts();
 
+    // 🔹 Только первый вход запускает синхронизацию
     if (!_hasSynced) {
       _hasSynced = true;
-      _syncData();
+      await _syncData();
     } else {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  /// 🔄 Основная функция синхронизации
   Future<void> _syncData() async {
     setState(() => _loading = true);
 
     try {
+      // 1️⃣ Синхронизация данных
       final status = await _apiService.syncAll();
+
+      // 2️⃣ Синхронизация картинок
+      await ImageSyncService.syncAllImages();
 
       if (status == SyncStatus.success) {
         OverlayService.showMessage(

@@ -4,6 +4,7 @@ import 'package:testing_app/services/config.dart';
 import 'package:testing_app/services/image_sync_service.dart';
 import '../theme/colors.dart';
 import '../widgets/dashboard_card.dart';
+import '../widgets/sync_modal.dart';
 import '../services/api_service.dart';
 import '../services/overlay_service.dart';
 import '../boxes/hive_boxes.dart';
@@ -98,33 +99,82 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _syncData() async {
     setState(() => _loading = true);
 
+    // Подготовка нотификаторов для модалки
+    final steps = ValueNotifier<Map<String, double>>({
+      'Категории': 0.0,
+      'Типы операций': 0.0,
+      'Товары': 0.0,
+      'Операции': 0.0,
+      'История': 0.0,
+      'Документы': 0.0,
+      'Фото': 0.0,
+    });
+    final statusText = ValueNotifier<String>('Инициализация...');
+    final isError = ValueNotifier<bool>(false);
+
+    // Показываем модалку (не закрываем по нажатию вне)
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          SyncModal(steps: steps, statusText: statusText, isError: isError),
+    );
+
     try {
-      // 1️⃣ Синхронизация данных
-      final status = await _apiService.syncAll();
+      statusText.value = 'Проверка сервера...';
 
-      // 2️⃣ Синхронизация картинок
+      // Категории
+      statusText.value = 'Синхронизируем категории...';
+      steps.value = {...steps.value, 'Категории': 0.2};
+      await _apiService.syncCategories(noTimeout: true);
+      steps.value = {...steps.value, 'Категории': 1.0};
+
+      // Типы операций
+      statusText.value = 'Синхронизируем типы операций...';
+      steps.value = {...steps.value, 'Типы операций': 0.2};
+      await _apiService.syncOperationTypes(noTimeout: true);
+      steps.value = {...steps.value, 'Типы операций': 1.0};
+
+      // Товары
+      statusText.value = 'Синхронизируем товары...';
+      steps.value = {...steps.value, 'Товары': 0.1};
+      await _apiService.syncProducts(noTimeout: true);
+      steps.value = {...steps.value, 'Товары': 1.0};
+
+      // Операции
+      statusText.value = 'Синхронизируем операции...';
+      steps.value = {...steps.value, 'Операции': 0.1};
+      await _apiService.syncOperations(noTimeout: true);
+      steps.value = {...steps.value, 'Операции': 1.0};
+
+      // История операций (operation products)
+      statusText.value = 'Синхронизируем историю операций...';
+      steps.value = {...steps.value, 'История': 0.1};
+      await _apiService.syncOperationProducts(noTimeout: true);
+      steps.value = {...steps.value, 'История': 1.0};
+
+      // Документы
+      statusText.value = 'Синхронизируем документы...';
+      steps.value = {...steps.value, 'Документы': 0.1};
+      await _apiService.syncDocuments(noTimeout: true);
+      steps.value = {...steps.value, 'Документы': 1.0};
+
+      // Фото
+      statusText.value = 'Синхронизируем фото...';
+      steps.value = {...steps.value, 'Фото': 0.0};
       await ImageSyncService.syncAllImages();
+      steps.value = {...steps.value, 'Фото': 1.0};
 
-      if (status == SyncStatus.success) {
-        OverlayService.showMessage(
-          context,
-          'Синхронизация завершена',
-          type: ToastType.success,
-        );
-      } else if (status == SyncStatus.info) {
-        OverlayService.showMessage(
-          context,
-          'Нет новых данных для синхронизации',
-          type: ToastType.info,
-        );
-      } else {
-        OverlayService.showMessage(
-          context,
-          'Сервер недоступен. Синхронизация отменена',
-          type: ToastType.error,
-        );
-      }
+      statusText.value = 'Готово';
+
+      OverlayService.showMessage(
+        context,
+        'Синхронизация завершена',
+        type: ToastType.success,
+      );
     } catch (e) {
+      isError.value = true;
+      statusText.value = 'Синхронизация не удалась\n$e';
       OverlayService.showMessage(
         context,
         'Синхронизация не удалась\n$e',
@@ -133,6 +183,13 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } finally {
       _updateCounts();
       if (mounted) setState(() => _loading = false);
+
+      // Закрываем модалку при успешном завершении. При ошибке оставляем пользователю кнопку "Закрыть".
+      if (!isError.value) {
+        try {
+          Navigator.of(context, rootNavigator: true).pop();
+        } catch (_) {}
+      }
     }
   }
 

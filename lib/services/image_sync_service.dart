@@ -37,6 +37,20 @@ class ImageSyncService {
     print('================ IMAGE SYNC FINISHED ================');
   }
 
+  /// Синхронизировать один объект изображения (используется SyncService)
+  static Future<void> syncSingleImage(ProductImage img) async {
+    final productBox = Hive.box<Product>(HiveBoxes.products);
+
+    // Если уже синхронизировано с сервером — ничего не делаем
+    if (img.isSynced && img.serverUrl != null) {
+      print('[SYNC SINGLE] ⏭ Уже синхронизировано: ${img.localPath}');
+      return;
+    }
+
+    // Если это локальное новое изображение — загружаем
+    await _uploadImage(img, productBox);
+  }
+
   /// ➕ Добавление фото локально (сразу отображается)
   static Future<void> addLocalImage(File file, int productId) async {
     final box = Hive.box<ProductImage>(HiveBoxes.productImages);

@@ -1,10 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/notification_model.dart';
 import '../viewmodels/notifications_viewmodel.dart';
 import '../theme/colors.dart';
+import '../widgets/photo_notification_card.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -125,12 +125,45 @@ class _NotificationsPageState extends State<NotificationsPage>
 
   Color _statusColor(NotificationStatus s) {
     switch (s) {
+      case NotificationStatus.pending:
+        return Colors.orange;
+      case NotificationStatus.uploading:
+        return Colors.blue;
+      case NotificationStatus.synced:
       case NotificationStatus.success:
         return Colors.green;
       case NotificationStatus.error:
         return Colors.red;
+    }
+  }
+
+  String _statusLabel(NotificationModel n) {
+    // Для фото — подробные пользовательские тексты
+    if (n.type == NotificationType.photo) {
+      switch (n.status) {
+        case NotificationStatus.pending:
+          return 'Фото добавлено (ожидает синхронизации)';
+        case NotificationStatus.uploading:
+          return 'Фото загружается…';
+        case NotificationStatus.synced:
+        case NotificationStatus.success:
+          return 'Фото добавлено и синхронизировано';
+        case NotificationStatus.error:
+          return 'Фото добавлено, синхронизация не выполнена';
+      }
+    }
+
+    // Для остальных типов — общие, нейтральные тексты
+    switch (n.status) {
       case NotificationStatus.pending:
-        return Colors.orange;
+        return 'Новая запись';
+      case NotificationStatus.uploading:
+        return 'В обработке';
+      case NotificationStatus.synced:
+      case NotificationStatus.success:
+        return 'Готово';
+      case NotificationStatus.error:
+        return 'Ошибка';
     }
   }
 
@@ -148,48 +181,61 @@ class _NotificationsPageState extends State<NotificationsPage>
         final n = list[idx];
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Card(
-            elevation: 1,
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.bgLight,
-                child: Icon(_iconForType(n.type), color: AppColors.brand),
-              ),
-              title: Text(
-                n.title,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(n.description),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    DateFormat('dd.MM.y HH:mm').format(n.timestamp),
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+          child: n.type == NotificationType.photo
+              ? Builder(
+                  builder: (ctx) {
+                    final data = vm.cardDataFor(n);
+                    return SizedBox(
+                      width: double.infinity,
+                      child: PhotoNotificationCard(data: data),
+                    );
+                  },
+                )
+              : Card(
+                  elevation: 1,
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AppColors.bgLight,
+                      child: Icon(_iconForType(n.type), color: AppColors.brand),
+                    ),
+                    title: Text(
+                      n.title,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(n.description),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          DateFormat('dd.MM.y HH:mm').format(n.timestamp),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _statusColor(n.status).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _statusLabel(n),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _statusColor(n.status),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _statusColor(n.status).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      describeEnum(n.status),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _statusColor(n.status),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                ),
         );
       },
     );

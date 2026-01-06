@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:collection/collection.dart';
 import '../services/notification_service.dart';
 import '../models/notification_model.dart';
+import '../models/photo_sync_status.dart';
 
 import '../theme/colors.dart';
 import '../boxes/hive_boxes.dart';
@@ -21,6 +23,7 @@ import '../widgets/product/tab_buttons.dart';
 import '../widgets/product/info_tab.dart';
 import '../widgets/product/history_tab.dart';
 import '../services/config.dart';
+import '../services/image_sync_service.dart';
 
 class ProductScreen extends StatefulWidget {
   final int productId;
@@ -64,6 +67,7 @@ class _ProductScreenState extends State<ProductScreen> {
 
   late Box<ProductImage> _imageBox;
   late Box<Product> _productBox;
+  StreamSubscription? _imageSub;
 
   @override
   void initState() {
@@ -91,6 +95,18 @@ class _ProductScreenState extends State<ProductScreen> {
 
     _loadHistory();
     _loadImages();
+
+    // Подписываемся на изменения в box изображений, чтобы обновлять UI при изменениях из других мест
+    _imageSub = _imageBox.watch().listen((event) {
+      final current = _imageBox.values
+          .where((img) => img.productId == widget.productId)
+          .toList();
+      _images = [];
+      for (final img in current) {
+        if (!_images.contains(img)) _images.add(img);
+      }
+      setState(() {});
+    });
   }
 
   void _onScroll() {
@@ -221,18 +237,12 @@ class _ProductScreenState extends State<ProductScreen> {
 
         await _imageBox.add(serverImg);
         _images.add(serverImg);
-        // Уведомление о скачанном фото с сервера
-        await NotificationService.addNotification(
-          NotificationModel(
-            id: 'photo_downloaded_${serverImg.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-            type: NotificationType.photo,
-            action: NotificationAction.create,
-            title: 'Фото загружено с сервера',
-            description: url,
-            timestamp: DateTime.now(),
-            status: NotificationStatus.success,
-            isRead: false,
-          ),
+        // Создаём/обновляем единое уведомление для скачанного фото
+        await NotificationService.upsertOrUpdatePhotoNotification(
+          clientId: serverImg.clientId,
+          productId: serverImg.productId,
+          status: PhotoSyncStatus.synced,
+          serverUrl: serverImg.serverUrl,
         );
       } catch (e) {
         print('[PRODUCT SCREEN] ❌ Ошибка скачивания: $e');
@@ -313,18 +323,12 @@ class _ProductScreenState extends State<ProductScreen> {
 
       await _imageBox.add(newImg);
 
-      // Создаём уведомление о добавлении локального фото
-      await NotificationService.addNotification(
-        NotificationModel(
-          id: 'photo_local_${newImg.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-          type: NotificationType.photo,
-          action: NotificationAction.create,
-          title: 'Добавлено фото',
-          description: 'Локальное фото для товара ID ${newImg.productId}',
-          timestamp: DateTime.now(),
-          status: NotificationStatus.pending,
-          isRead: false,
-        ),
+      // Создаём/обновляем единое уведомление для локально добавленного фото
+      await NotificationService.upsertOrUpdatePhotoNotification(
+        clientId: newImg.clientId,
+        productId: newImg.productId,
+        status: PhotoSyncStatus.pending,
+        localPath: newImg.localPath,
       );
 
       setState(() {
@@ -391,62 +395,40 @@ class _ProductScreenState extends State<ProductScreen> {
             _images.add(img);
           }
           setState(() {});
-          // Уведомление об успешной загрузке фото
-          await NotificationService.addNotification(
-            NotificationModel(
-              id: 'photo_uploaded_${img.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-              type: NotificationType.photo,
-              action: NotificationAction.sync,
-              title: 'Фото загружено',
-              description: 'Фото для товара ID ${img.productId}',
-              timestamp: DateTime.now(),
-              status: NotificationStatus.success,
-              isRead: false,
-            ),
+          // Обновляем единое уведомление — фото синхронизировано
+          await NotificationService.upsertOrUpdatePhotoNotification(
+            clientId: img.clientId,
+            productId: img.productId,
+            status: PhotoSyncStatus.synced,
+            serverUrl: serverUrl,
           );
         } else {
           print('[UPLOAD] ❌ serverUrl не вернулся');
-          await NotificationService.addNotification(
-            NotificationModel(
-              id: 'photo_upload_error_${img.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-              type: NotificationType.photo,
-              action: NotificationAction.sync,
-              title: 'Ошибка загрузки фото',
-              description: 'Не удалось получить URL от сервера',
-              timestamp: DateTime.now(),
-              status: NotificationStatus.error,
-              isRead: false,
-            ),
+          await NotificationService.upsertOrUpdatePhotoNotification(
+            clientId: img.clientId,
+            productId: img.productId,
+            status: PhotoSyncStatus.error,
+            errorText: 'Не удалось получить адрес изображения от сервера',
           );
         }
       } else {
         print('[UPLOAD] ❌ HTTP ${streamed.statusCode}');
-        await NotificationService.addNotification(
-          NotificationModel(
-            id: 'photo_upload_error_${img.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-            type: NotificationType.photo,
-            action: NotificationAction.sync,
-            title: 'Ошибка загрузки фото',
-            description: 'HTTP ${streamed.statusCode}',
-            timestamp: DateTime.now(),
-            status: NotificationStatus.error,
-            isRead: false,
-          ),
+        await NotificationService.upsertOrUpdatePhotoNotification(
+          clientId: img.clientId,
+          productId: img.productId,
+          status: PhotoSyncStatus.error,
+          errorText: 'Ошибка сервера: HTTP ${streamed.statusCode}',
         );
       }
     } catch (e) {
       print('[UPLOAD] ❌ Ошибка загрузки: $e');
-      await NotificationService.addNotification(
-        NotificationModel(
-          id: 'photo_upload_error_${img.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-          type: NotificationType.photo,
-          action: NotificationAction.sync,
-          title: 'Ошибка загрузки фото',
-          description: e.toString(),
-          timestamp: DateTime.now(),
-          status: NotificationStatus.error,
-          isRead: false,
-        ),
+      await NotificationService.upsertOrUpdatePhotoNotification(
+        clientId: img.clientId,
+        productId: img.productId,
+        status: (e is SocketException)
+            ? PhotoSyncStatus.paused
+            : PhotoSyncStatus.error,
+        errorText: 'Ошибка загрузки: ${e.toString()}',
       );
     } finally {
       img.isUploading = false;
@@ -456,6 +438,9 @@ class _ProductScreenState extends State<ProductScreen> {
 
   @override
   void dispose() {
+    try {
+      _imageSub?.cancel();
+    } catch (_) {}
     _scrollController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -541,6 +526,11 @@ class _ProductScreenState extends State<ProductScreen> {
                     onPageChanged: (index) =>
                         setState(() => _activeImageIndex = index),
                     onAddImage: _addImageFromGallery,
+                    onRetryImage: (img) async {
+                      await ImageSyncService.syncSingleImage(img);
+                      // Обновим UI после завершения повторной загрузки
+                      setState(() {});
+                    },
                   ),
           ),
           BackButtonWidget(topPadding: topPadding),

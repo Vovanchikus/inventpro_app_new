@@ -29,11 +29,15 @@ enum NotificationAction {
 @HiveType(typeId: 12)
 enum NotificationStatus {
   @HiveField(0)
-  success,
-  @HiveField(1)
-  error,
-  @HiveField(2)
   pending,
+  @HiveField(1)
+  uploading,
+  @HiveField(2)
+  synced,
+  @HiveField(3)
+  error,
+  @HiveField(4)
+  success, // legacy
 }
 
 @HiveType(typeId: 13)
@@ -127,14 +131,20 @@ class NotificationModel {
 
     NotificationStatus _status = NotificationStatus.success;
     switch (map['status'] as String?) {
-      case 'success':
-        _status = NotificationStatus.success;
+      case 'pending':
+        _status = NotificationStatus.pending;
+        break;
+      case 'uploading':
+        _status = NotificationStatus.uploading;
+        break;
+      case 'synced':
+        _status = NotificationStatus.synced;
         break;
       case 'error':
         _status = NotificationStatus.error;
         break;
-      case 'pending':
-        _status = NotificationStatus.pending;
+      case 'success':
+        _status = NotificationStatus.success;
         break;
     }
 

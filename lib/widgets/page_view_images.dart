@@ -11,6 +11,7 @@ class PageViewImages extends StatefulWidget {
   final PageController pageController;
   final void Function() onAddImage;
   final void Function(int) onPageChanged;
+  final void Function(dynamic) onRetryImage;
 
   const PageViewImages({
     super.key,
@@ -19,6 +20,7 @@ class PageViewImages extends StatefulWidget {
     required this.pageController,
     required this.onAddImage,
     required this.onPageChanged,
+    required this.onRetryImage,
   });
 
   @override
@@ -114,24 +116,60 @@ class _PageViewImagesState extends State<PageViewImages> {
                     ),
                   ),
 
-                  // upload progress overlay for new local images
+                  // upload status overlay for new local images
                   if (img.isNew && !img.isSynced)
-                    Positioned.fill(
-                      child: Container(
-                        color: Colors.black45,
-                        child: Center(
-                          child: SizedBox(
-                            width: 56,
-                            height: 56,
-                            child: CircularProgressIndicator(
-                              value: img.uploadProgress > 0
-                                  ? img.uploadProgress
-                                  : null,
-                              strokeWidth: 4,
-                              color: Colors.white,
+                    Positioned(
+                      left: 12,
+                      bottom: 12,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: img.isUploading
+                                      ? CircularProgressIndicator(
+                                          value: img.uploadProgress > 0
+                                              ? img.uploadProgress
+                                              : null,
+                                          strokeWidth: 3,
+                                          color: Colors.white,
+                                        )
+                                      : const Icon(
+                                          Icons.hourglass_empty,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  img.isUploading
+                                      ? 'Загружается…'
+                                      : 'Ожидает синхронизации',
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                                const SizedBox(width: 8),
+                                TextButton(
+                                  onPressed: () => widget.onRetryImage(img),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Повторить'),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                 ],

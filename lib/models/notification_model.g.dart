@@ -170,27 +170,37 @@ class NotificationStatusAdapter extends TypeAdapter<NotificationStatus> {
   NotificationStatus read(BinaryReader reader) {
     switch (reader.readByte()) {
       case 0:
-        return NotificationStatus.success;
-      case 1:
-        return NotificationStatus.error;
-      case 2:
         return NotificationStatus.pending;
-      default:
+      case 1:
+        return NotificationStatus.uploading;
+      case 2:
+        return NotificationStatus.synced;
+      case 3:
+        return NotificationStatus.error;
+      case 4:
         return NotificationStatus.success;
+      default:
+        return NotificationStatus.pending;
     }
   }
 
   @override
   void write(BinaryWriter writer, NotificationStatus obj) {
     switch (obj) {
-      case NotificationStatus.success:
+      case NotificationStatus.pending:
         writer.writeByte(0);
         break;
-      case NotificationStatus.error:
+      case NotificationStatus.uploading:
         writer.writeByte(1);
         break;
-      case NotificationStatus.pending:
+      case NotificationStatus.synced:
         writer.writeByte(2);
+        break;
+      case NotificationStatus.error:
+        writer.writeByte(3);
+        break;
+      case NotificationStatus.success:
+        writer.writeByte(4);
         break;
     }
   }

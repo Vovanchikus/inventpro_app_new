@@ -10,6 +10,8 @@ import '../boxes/hive_boxes.dart';
 import '../models/product_image.dart';
 import '../models/product.dart';
 import '../models/notification_model.dart';
+import '../models/photo_sync_status.dart';
+import '../services/notification_service.dart';
 import 'config.dart';
 
 class ImageSyncService {
@@ -89,6 +91,14 @@ class ImageSyncService {
 
     print('[LOCAL] Фото добавлено локально: ${file.path}');
 
+    // Создаём/обновляем единое уведомление для этого фото — pending
+    await NotificationService.upsertOrUpdatePhotoNotification(
+      clientId: img.clientId,
+      productId: productId,
+      status: PhotoSyncStatus.pending,
+      localPath: img.localPath,
+    );
+
     // 🔄 Запускаем асинхронную загрузку
     _uploadImage(img, productBox);
   }
@@ -107,6 +117,14 @@ class ImageSyncService {
     img.isUploading = true;
     img.uploadProgress = 0.0;
     await img.save();
+
+    // Обновляем уведомление в статус uploading
+    await NotificationService.upsertOrUpdatePhotoNotification(
+      clientId: img.clientId,
+      productId: img.productId,
+      status: PhotoSyncStatus.uploading,
+      localPath: img.localPath,
+    );
 
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
@@ -130,6 +148,13 @@ class ImageSyncService {
         print('[UPLOAD] ❌ Ошибка HTTP ${streamed.statusCode}');
         img.isUploading = false;
         await img.save();
+        // Ошибка HTTP — помечаем как error
+        await NotificationService.upsertOrUpdatePhotoNotification(
+          clientId: img.clientId,
+          productId: img.productId,
+          status: PhotoSyncStatus.error,
+          errorText: 'Ошибка сервера: HTTP ${streamed.statusCode}',
+        );
         return;
       }
 
@@ -140,6 +165,12 @@ class ImageSyncService {
         print('[UPLOAD] ❌ serverUrl не вернулся');
         img.isUploading = false;
         await img.save();
+        await NotificationService.upsertOrUpdatePhotoNotification(
+          clientId: img.clientId,
+          productId: img.productId,
+          status: PhotoSyncStatus.error,
+          errorText: 'Сервер не вернул адрес изображения',
+        );
         return;
       }
 
@@ -159,11 +190,31 @@ class ImageSyncService {
         product.images = [...product.images, serverUrl];
         await productBox.put(product.id, product);
       }
+
+      // Обновляем уведомление — synced
+      await NotificationService.upsertOrUpdatePhotoNotification(
+        clientId: img.clientId,
+        productId: img.productId,
+        status: PhotoSyncStatus.synced,
+        serverUrl: serverUrl,
+      );
     } catch (e) {
-      print('[UPLOAD] ❌ Исключение: $e');
+      if (e is SocketException) {
+        print('[UPLOAD] Сеть недоступна — помечаем как приостановлено');
+      } else {
+        print('[UPLOAD] ❌ Исключение: $e');
+      }
       img.isUploading = false;
       img.uploadProgress = 0.0;
       await img.save();
+      await NotificationService.upsertOrUpdatePhotoNotification(
+        clientId: img.clientId,
+        productId: img.productId,
+        status: (e is SocketException)
+            ? PhotoSyncStatus.paused
+            : PhotoSyncStatus.error,
+        errorText: 'Ошибка при загрузке: $e',
+      );
     }
   }
 
@@ -218,17 +269,12 @@ class ImageSyncService {
           productBox,
         );
         if (downloaded != null) {
-          notifications.add(
-            NotificationModel(
-              id: 'photo_sync_${downloaded.clientId}_${DateTime.now().millisecondsSinceEpoch}',
-              type: NotificationType.photo,
-              action: NotificationAction.create,
-              title: 'Добавлено фото',
-              description: 'Фото для товара ID ${downloaded.productId}',
-              timestamp: DateTime.now(),
-              status: NotificationStatus.success,
-              isRead: false,
-            ),
+          // Создаём/обновляем единое уведомление для скачанного фото
+          await NotificationService.upsertOrUpdatePhotoNotification(
+            clientId: downloaded.clientId,
+            productId: downloaded.productId,
+            status: NotificationStatus.synced,
+            serverUrl: downloaded.serverUrl,
           );
         }
       }

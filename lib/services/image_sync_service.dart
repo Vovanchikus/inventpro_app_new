@@ -9,20 +9,23 @@ import 'package:path_provider/path_provider.dart';
 import '../boxes/hive_boxes.dart';
 import '../models/product_image.dart';
 import '../models/product.dart';
+import '../models/notification_model.dart';
 import 'config.dart';
 
 class ImageSyncService {
   /// 🔥 Главная точка синхронизации
-  static Future<void> syncAllImages() async {
+  static Future<List<NotificationModel>> syncAllImages() async {
     print('================ IMAGE SYNC STARTED ================');
 
     final box = Hive.box<ProductImage>(HiveBoxes.productImages);
     final productBox = Hive.box<Product>(HiveBoxes.products);
 
     print('[SYNC] Локальных изображений в Hive: ${box.length}');
+    final List<NotificationModel> notifications = [];
 
     // 1️⃣ Синхронизация с сервера
-    await _syncFromServer(box, productBox);
+    final downloaded = await _syncFromServer(box, productBox);
+    notifications.addAll(downloaded);
 
     // 2️⃣ Загрузка новых локальных изображений
     final unsynced = box.values.where((img) => img.isNew).toList();
@@ -35,6 +38,7 @@ class ImageSyncService {
     }
 
     print('================ IMAGE SYNC FINISHED ================');
+    return notifications;
   }
 
   /// Синхронизировать один объект изображения (используется SyncService)
@@ -164,7 +168,7 @@ class ImageSyncService {
   }
 
   /// 🔄 Синхронизация с сервера
-  static Future<void> _syncFromServer(
+  static Future<List<NotificationModel>> _syncFromServer(
     Box<ProductImage> box,
     Box<Product> productBox,
   ) async {
@@ -176,15 +180,16 @@ class ImageSyncService {
 
     if (resp.statusCode != 200) {
       print('[SERVER SYNC] ❌ Ошибка HTTP ${resp.statusCode}');
-      return;
+      return <NotificationModel>[];
     }
 
     final data = jsonDecode(resp.body);
     if (data['success'] != true) {
       print('[SERVER SYNC] ❌ success=false');
-      return;
+      return <NotificationModel>[];
     }
 
+    final List<NotificationModel> notifications = [];
     for (final product in data['data']) {
       final int productId = product['id'];
       final List images = product['images'] ?? [];
@@ -206,7 +211,26 @@ class ImageSyncService {
         }
 
         print('[SERVER SYNC] ⬇ Скачиваем: $serverUrl');
-        await _downloadImage(productId, serverUrl, box, productBox);
+        final downloaded = await _downloadImage(
+          productId,
+          serverUrl,
+          box,
+          productBox,
+        );
+        if (downloaded != null) {
+          notifications.add(
+            NotificationModel(
+              id: 'photo_sync_${downloaded.clientId}_${DateTime.now().millisecondsSinceEpoch}',
+              type: NotificationType.photo,
+              action: NotificationAction.create,
+              title: 'Добавлено фото',
+              description: 'Фото для товара ID ${downloaded.productId}',
+              timestamp: DateTime.now(),
+              status: NotificationStatus.success,
+              isRead: false,
+            ),
+          );
+        }
       }
     }
 
@@ -235,10 +259,11 @@ class ImageSyncService {
         }
       }
     }
+    return notifications;
   }
 
   /// ⬇ Скачивание изображения с сервера
-  static Future<void> _downloadImage(
+  static Future<ProductImage?> _downloadImage(
     int productId,
     String serverUrl,
     Box<ProductImage> box,
@@ -269,13 +294,13 @@ class ImageSyncService {
         existing.isSynced = true;
         existing.isNew = false;
         await existing.save();
-        return;
+        return existing;
       }
 
       final resp = await http.get(Uri.parse(serverUrl));
       if (resp.statusCode != 200) {
         print('[DOWNLOAD] ❌ Ошибка загрузки $serverUrl');
-        return;
+        return null;
       }
 
       final file = File(filePath);
@@ -298,8 +323,10 @@ class ImageSyncService {
       }
 
       print('[DOWNLOAD] ✅ Скачано: $filePath');
+      return img;
     } catch (e) {
       print('[DOWNLOAD] ❌ Исключение: $e');
+      return null;
     }
   }
 }

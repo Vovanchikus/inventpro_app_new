@@ -7,6 +7,8 @@ import '../theme/colors.dart';
 import '../widgets/dashboard_card.dart';
 import '../widgets/sync_modal.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
+import '../models/notification_model.dart';
 import '../services/overlay_service.dart';
 import '../boxes/hive_boxes.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -163,43 +165,61 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Категории
       statusText.value = 'Синхронизируем категории...';
       steps.value = {...steps.value, 'Категории': 0.2};
-      await _apiService.syncCategories(noTimeout: true);
+      final List<NotificationModel> catNotifs = await _apiService
+          .syncCategories(noTimeout: true);
+      for (final n in catNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Категории': 1.0};
 
       // Типы операций
       statusText.value = 'Синхронизируем типы операций...';
       steps.value = {...steps.value, 'Типы операций': 0.2};
-      await _apiService.syncOperationTypes(noTimeout: true);
+      final List<NotificationModel> opTypeNotifs = await _apiService
+          .syncOperationTypes(noTimeout: true);
+      for (final n in opTypeNotifs)
+        await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Типы операций': 1.0};
 
       // Товары
       statusText.value = 'Синхронизируем товары...';
       steps.value = {...steps.value, 'Товары': 0.1};
-      await _apiService.syncProducts(noTimeout: true);
+      final List<NotificationModel> prodNotifs = await _apiService.syncProducts(
+        noTimeout: true,
+      );
+      for (final n in prodNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Товары': 1.0};
 
       // Операции
       statusText.value = 'Синхронизируем операции...';
       steps.value = {...steps.value, 'Операции': 0.1};
-      await _apiService.syncOperations(noTimeout: true);
+      final List<NotificationModel> opNotifs = await _apiService.syncOperations(
+        noTimeout: true,
+      );
+      for (final n in opNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Операции': 1.0};
 
       // История операций (operation products)
       statusText.value = 'Синхронизируем историю операций...';
       steps.value = {...steps.value, 'История': 0.1};
-      await _apiService.syncOperationProducts(noTimeout: true);
+      final List<NotificationModel> histNotifs = await _apiService
+          .syncOperationProducts(noTimeout: true);
+      for (final n in histNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'История': 1.0};
 
       // Документы
       statusText.value = 'Синхронизируем документы...';
       steps.value = {...steps.value, 'Документы': 0.1};
-      await _apiService.syncDocuments(noTimeout: true);
+      final List<NotificationModel> docNotifs = await _apiService.syncDocuments(
+        noTimeout: true,
+      );
+      for (final n in docNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Документы': 1.0};
 
       // Фото
       statusText.value = 'Синхронизируем фото...';
       steps.value = {...steps.value, 'Фото': 0.0};
-      await ImageSyncService.syncAllImages();
+      final List<NotificationModel> imgNotifs =
+          await ImageSyncService.syncAllImages();
+      for (final n in imgNotifs) await NotificationService.addNotification(n);
       steps.value = {...steps.value, 'Фото': 1.0};
 
       statusText.value = 'Готово';

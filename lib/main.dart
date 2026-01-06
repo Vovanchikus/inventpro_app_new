@@ -13,9 +13,11 @@ import 'models/operation_type.dart';
 import 'models/operation.dart';
 import 'models/operation_product.dart';
 import 'models/document.dart';
+import 'models/notification_model.dart';
 
 // Импорт Box helper
 import 'boxes/hive_boxes.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,9 +33,17 @@ void main() async {
   Hive.registerAdapter(OperationProductAdapter());
   Hive.registerAdapter(DocumentAdapter());
   Hive.registerAdapter(ProductImageAdapter());
+  // Notification adapters (generated)
+  Hive.registerAdapter(NotificationTypeAdapter());
+  Hive.registerAdapter(NotificationActionAdapter());
+  Hive.registerAdapter(NotificationStatusAdapter());
+  Hive.registerAdapter(NotificationModelAdapter());
 
   // Открытие всех Box'ов
   await HiveBoxes.openAll();
+
+  // Инициализация истории уведомлений из старых данных (если пусто)
+  await NotificationService.initHistoricFromData();
 
   runApp(const MyApp());
 }

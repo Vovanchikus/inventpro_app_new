@@ -4,6 +4,8 @@ import 'package:hive/hive.dart';
 
 import 'api_service.dart';
 import 'image_sync_service.dart';
+import 'notification_service.dart';
+import '../models/notification_model.dart';
 import '../models/product.dart';
 import '../models/product_image.dart';
 import '../boxes/hive_boxes.dart';
@@ -40,21 +42,15 @@ class SyncService {
       // 🔹 Синхронизация данных с таймаутом на подключение
       final dataSyncFuture = apiService.syncAll();
 
-      final result = await dataSyncFuture.timeout(
-        connectionTimeout,
-        onTimeout: () {
-          throw TimeoutException('Нет подключения к серверу');
-        },
-      );
+      final List<NotificationModel> dataNotifications = await dataSyncFuture
+          .timeout(
+            connectionTimeout,
+            onTimeout: () {
+              throw TimeoutException('Нет подключения к серверу');
+            },
+          );
 
-      if (result != SyncStatus.success) {
-        step.value = SyncStep.error;
-        statusText.value = 'Ошибка синхронизации данных';
-        debugPrint(
-          '[SyncService] ❌ Синхронизация данных завершилась с ошибкой',
-        );
-        return;
-      }
+      // После успешной загрузки данных — уведомления будут созданы ниже
 
       // 🔹 Динамический прогресс по шагам данных
       final dataSteps = [
@@ -83,31 +79,32 @@ class SyncService {
       statusText.value = 'Синхронизация изображений...';
       progress.value = 0.3;
 
-      final Box<ProductImage> imageBox = Hive.box<ProductImage>(
-        HiveBoxes.productImages,
+      // Синхронизация изображений: получаем уведомления о скачанных картинках
+      final imageNotifications = await ImageSyncService.syncAllImages();
+
+      // Комбинируем уведомления от данных и от изображений
+      final allNotifications = <NotificationModel>[];
+      allNotifications.addAll(dataNotifications);
+      allNotifications.addAll(imageNotifications);
+
+      // Отправляем уведомления через NotificationService
+      for (final n in allNotifications) {
+        await NotificationService.addNotification(n);
+      }
+
+      // Завершающее уведомление о синхронизации
+      await NotificationService.addNotification(
+        NotificationModel(
+          id: 'sync_complete_${DateTime.now().millisecondsSinceEpoch}',
+          type: NotificationType.operation,
+          action: NotificationAction.sync,
+          title: 'Синхронизация завершена',
+          description: 'Данные успешно синхронизированы',
+          timestamp: DateTime.now(),
+          status: NotificationStatus.success,
+          isRead: false,
+        ),
       );
-      final Box<Product> productBox = Hive.box<Product>(HiveBoxes.products);
-
-      final images = imageBox.values.toList();
-      final totalImages = images.length;
-
-      if (totalImages == 0) {
-        statusText.value = 'Нет изображений для синхронизации';
-        step.value = SyncStep.completed;
-        progress.value = 1.0;
-        return;
-      }
-
-      int completedImages = 0;
-
-      // Синхронизация картинок через ImageSyncService
-      for (final img in images) {
-        statusText.value =
-            'Синхронизация изображения ${completedImages + 1} из $totalImages';
-        await ImageSyncService.syncSingleImage(img);
-        completedImages++;
-        progress.value = 0.3 + (completedImages / totalImages) * 0.7;
-      }
 
       step.value = SyncStep.completed;
       statusText.value = 'Синхронизация завершена';

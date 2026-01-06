@@ -13,6 +13,7 @@ import '../models/operation.dart';
 import '../models/operation_product.dart';
 import '../models/document.dart';
 import '../boxes/hive_boxes.dart';
+import '../models/notification_model.dart';
 
 enum SyncStatus { success, info, error }
 
@@ -67,45 +68,38 @@ class ApiService {
     }
   }
 
-  Future<SyncStatus> syncAll() async {
+  /// Выполняет синхронизацию данных и возвращает список уведомлений,
+  /// которые должны быть созданы на основании новых серверных объектов.
+  Future<List<NotificationModel>> syncAll() async {
     const connectTimeout = Duration(seconds: 5);
-
     try {
       await _get('categories', timeout: connectTimeout);
     } on TimeoutException catch (_) {
       debugPrint('[ApiService] Сервер недоступен');
-      return SyncStatus.error;
+      throw TimeoutException('Сервер недоступен');
     } catch (e) {
       debugPrint('[ApiService] Ошибка проверки сервера: $e');
-      return SyncStatus.error;
+      rethrow;
     }
 
     try {
-      await _syncAllInternal(noTimeout: true);
-      return SyncStatus.success;
+      final notifications = await _syncAllInternal(noTimeout: true);
+      return notifications;
     } catch (e) {
       debugPrint('[ApiService] Ошибка syncAll: $e');
-      return SyncStatus.error;
+      rethrow;
     }
   }
 
-  Future<void> _syncAllInternal({bool noTimeout = false}) async {
-    await syncCategories(noTimeout: noTimeout);
-    await syncOperationTypes(noTimeout: noTimeout);
-    await syncProducts(noTimeout: noTimeout);
-    await syncOperations(noTimeout: noTimeout);
-    await syncOperationProducts(noTimeout: noTimeout);
-    await syncDocuments(noTimeout: noTimeout);
-  }
-
   // ----------------------- Категории -----------------------
-  Future<int> syncCategories({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncCategories({
+    bool noTimeout = false,
+  }) async {
     final data = await _get('categories', noTimeout: noTimeout);
     final box = Hive.box<Category>(HiveBoxes.categories);
-    int updated = 0;
+    final List<NotificationModel> notifications = [];
 
-    Future<int> _saveRecursive(List<dynamic> items, int? parentId) async {
-      int count = 0;
+    Future<void> _saveRecursive(List<dynamic> items, int? parentId) async {
       for (var item in items) {
         final category = Category(
           id: item['id'] ?? 0,
@@ -119,25 +113,39 @@ class ApiService {
             existing.name != category.name ||
             existing.parentId != category.parentId) {
           box.put(category.id, category);
-          count++;
+          if (existing == null) {
+            notifications.add(
+              NotificationModel(
+                id: 'category_sync_${category.id}_${DateTime.now().millisecondsSinceEpoch}',
+                type: NotificationType.category,
+                action: NotificationAction.create,
+                title: 'Добавлена категория',
+                description: category.name,
+                timestamp: DateTime.now(),
+                status: NotificationStatus.success,
+                isRead: false,
+              ),
+            );
+          }
         }
         if (item['children'] != null && item['children'] is List) {
-          count += await _saveRecursive(item['children'], category.id);
+          await _saveRecursive(item['children'], category.id);
         }
       }
-      return count;
     }
 
-    updated = await _saveRecursive(data, null);
-    debugPrint('[ApiService] Категории обновлены: $updated');
-    return updated;
+    await _saveRecursive(data, null);
+    debugPrint(
+      '[ApiService] Категории синхронизированы, уведомлений: ${notifications.length}',
+    );
+    return notifications;
   }
 
   // ----------------------- Продукты -----------------------
-  Future<int> syncProducts({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncProducts({bool noTimeout = false}) async {
     final data = await _get('products', noTimeout: noTimeout);
     final box = Hive.box<Product>(HiveBoxes.products);
-    int updated = 0;
+    final List<NotificationModel> notifications = [];
 
     for (var item in data) {
       final product = Product(
@@ -171,12 +179,27 @@ class ApiService {
           existing.categoryId != product.categoryId ||
           !_listEquals(existing.images, product.images)) {
         box.put(product.id, product);
-        updated++;
+        if (existing == null) {
+          notifications.add(
+            NotificationModel(
+              id: 'product_sync_${product.id}_${DateTime.now().millisecondsSinceEpoch}',
+              type: NotificationType.product,
+              action: NotificationAction.create,
+              title: 'Добавлен товар',
+              description: product.name,
+              timestamp: DateTime.now(),
+              status: NotificationStatus.success,
+              isRead: false,
+            ),
+          );
+        }
       }
     }
 
-    debugPrint('[ApiService] Продукты обновлены: $updated');
-    return updated;
+    debugPrint(
+      '[ApiService] Продукты синхронизированы, уведомлений: ${notifications.length}',
+    );
+    return notifications;
   }
 
   bool _listEquals(List<String> a, List<String> b) {
@@ -188,11 +211,12 @@ class ApiService {
   }
 
   // ----------------------- Типы операций -----------------------
-  Future<int> syncOperationTypes({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncOperationTypes({
+    bool noTimeout = false,
+  }) async {
     final data = await _get('operation-types', noTimeout: noTimeout);
     final box = Hive.box<OperationType>(HiveBoxes.operationTypes);
-    int updated = 0;
-
+    final List<NotificationModel> notifications = [];
     for (var item in data) {
       final type = OperationType(
         id: item['id'] ?? 0,
@@ -201,19 +225,21 @@ class ApiService {
       final existing = box.get(type.id);
       if (existing == null || existing.name != type.name) {
         box.put(type.id, type);
-        updated++;
+        // no notifications for operation types
       }
     }
 
-    debugPrint('[ApiService] Типы операций обновлены: $updated');
-    return updated;
+    debugPrint('[ApiService] Типы операций синхронизированы');
+    return notifications;
   }
 
   // ----------------------- Операции -----------------------
-  Future<int> syncOperations({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncOperations({
+    bool noTimeout = false,
+  }) async {
     final data = await _get('operations', noTimeout: noTimeout);
     final box = Hive.box<Operation>(HiveBoxes.operations);
-    int updated = 0;
+    final List<NotificationModel> notifications = [];
 
     for (var item in data) {
       final op = Operation(
@@ -230,20 +256,36 @@ class ApiService {
       final existing = box.get(op.id);
       if (existing == null || existing.typeId != op.typeId) {
         box.put(op.id, op);
-        updated++;
+        if (existing == null) {
+          notifications.add(
+            NotificationModel(
+              id: 'operation_sync_${op.id}_${DateTime.now().millisecondsSinceEpoch}',
+              type: NotificationType.operation,
+              action: NotificationAction.create,
+              title: 'Новая операция',
+              description: 'Операция #${op.id}',
+              timestamp: DateTime.now(),
+              status: NotificationStatus.success,
+              isRead: false,
+            ),
+          );
+        }
       }
     }
 
-    debugPrint('[ApiService] Операции обновлены: $updated');
-    return updated;
+    debugPrint(
+      '[ApiService] Операции синхронизированы, уведомлений: ${notifications.length}',
+    );
+    return notifications;
   }
 
   // ----------------------- OperationProducts -----------------------
-  Future<int> syncOperationProducts({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncOperationProducts({
+    bool noTimeout = false,
+  }) async {
     final data = await _get('history', noTimeout: noTimeout);
     final box = Hive.box<OperationProduct>(HiveBoxes.operationProducts);
-    int updated = 0;
-
+    final List<NotificationModel> notifications = [];
     for (var item in data) {
       DateTime? docDate;
       final docDateStr = item['doc_date']?.toString();
@@ -301,20 +343,20 @@ class ApiService {
           existing.counteragent != opProduct.counteragent ||
           existing.docDate != opProduct.docDate) {
         box.put(opProduct.id, opProduct);
-        updated++;
       }
     }
 
-    debugPrint('[ApiService] OperationProducts обновлены: $updated');
-    return updated;
+    debugPrint('[ApiService] OperationProducts синхронизированы');
+    return notifications;
   }
 
   // ----------------------- Документы -----------------------
-  Future<int> syncDocuments({bool noTimeout = false}) async {
+  Future<List<NotificationModel>> syncDocuments({
+    bool noTimeout = false,
+  }) async {
     final data = await _get('documents', noTimeout: noTimeout);
     final box = Hive.box<Document>(HiveBoxes.documents);
-    int updated = 0;
-
+    final List<NotificationModel> notifications = [];
     for (var item in data) {
       final doc = Document(
         id: item['id'] ?? 0,
@@ -331,11 +373,25 @@ class ApiService {
       final existing = box.get(doc.id);
       if (existing == null || existing.name != doc.name) {
         box.put(doc.id, doc);
-        updated++;
       }
     }
+    debugPrint('[ApiService] Документы синхронизированы');
+    return notifications;
+  }
 
-    debugPrint('[ApiService] Документы обновлены: $updated');
-    return updated;
+  /// Внутренний агрегатор: выполняет все шаги и собирает NotificationModel-ы
+  Future<List<NotificationModel>> _syncAllInternal({
+    bool noTimeout = false,
+  }) async {
+    final List<NotificationModel> notifications = [];
+
+    notifications.addAll(await syncCategories(noTimeout: noTimeout));
+    notifications.addAll(await syncOperationTypes(noTimeout: noTimeout));
+    notifications.addAll(await syncProducts(noTimeout: noTimeout));
+    notifications.addAll(await syncOperations(noTimeout: noTimeout));
+    notifications.addAll(await syncOperationProducts(noTimeout: noTimeout));
+    notifications.addAll(await syncDocuments(noTimeout: noTimeout));
+
+    return notifications;
   }
 }

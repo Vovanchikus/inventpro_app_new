@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../models/notification_model.dart';
 
 import '../theme/colors.dart';
 import '../widgets/app_bottom_bar.dart';
@@ -8,6 +11,7 @@ import 'home_screen.dart';
 import 'warehouse_screen.dart';
 import 'operation_history_screen.dart';
 import 'qr_screen.dart';
+import 'notifications_page.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -44,6 +48,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             .animate(
               CurvedAnimation(parent: _syncController, curve: Curves.linear),
             );
+
+    // Открываем box уведомлений (если ещё не открыт)
+    if (!Hive.isBoxOpen('notificationsBox')) {
+      Hive.openBox('notificationsBox').then((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   void _onTabTap(int index) {
@@ -180,6 +191,85 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 ? _buildSyncButton()
                 : const SizedBox.shrink(key: ValueKey('empty')),
           ),
+          Hive.isBoxOpen('notificationsBox')
+              ? ValueListenableBuilder(
+                  valueListenable: Hive.box('notificationsBox').listenable(),
+                  builder: (context, Box box, _) {
+                    // считаем непрочитанные
+                    int count = 0;
+                    for (final v in box.values) {
+                      if (v is NotificationModel) {
+                        if (!v.isRead) count += (v.count ?? 1);
+                      } else if (v is Map) {
+                        if (v['isRead'] != true) {
+                          final raw = v['count'];
+                          int add = 1;
+                          if (raw is int) {
+                            add = raw;
+                          } else if (raw is double) {
+                            add = raw.toInt();
+                          } else if (raw != null) {
+                            add = int.tryParse(raw.toString()) ?? 1;
+                          }
+                          count += add;
+                        }
+                      }
+                    }
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.history),
+                          color: AppColors.textTitle,
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const NotificationsPage(),
+                              ),
+                            );
+                          },
+                        ),
+                        if (count > 0)
+                          Positioned(
+                            right: 4,
+                            top: 6,
+                            child: IgnorePointer(
+                              ignoring: true,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  count.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                )
+              : IconButton(
+                  icon: const Icon(Icons.history),
+                  color: AppColors.textTitle,
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsPage(),
+                      ),
+                    );
+                  },
+                ),
           const SizedBox(width: 8),
         ],
       ),

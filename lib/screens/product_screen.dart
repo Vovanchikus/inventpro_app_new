@@ -251,55 +251,68 @@ class _ProductScreenState extends State<ProductScreen> {
   }
 
   Future<void> _addImageFromGallery() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile == null) return;
+    // Попробуем выбрать несколько изображений (pickMultiImage). Если недоступно — выбор одного.
+    final ImagePicker picker = ImagePicker();
+    List<XFile>? pickedFiles;
+    try {
+      pickedFiles = await picker.pickMultiImage();
+    } catch (_) {
+      final single = await picker.pickImage(source: ImageSource.gallery);
+      if (single != null) pickedFiles = [single];
+    }
+
+    if (pickedFiles == null || pickedFiles.isEmpty) return;
 
     final dir = await getApplicationDocumentsDirectory();
     final productDir = Directory('${dir.path}/products/${widget.productId}');
     if (!productDir.existsSync()) await productDir.create(recursive: true);
 
-    final filename = pickedFile.path.split('/').last;
-    final destPath = '${productDir.path}/$filename';
+    final startIndex = _images.length;
+    int added = 0;
 
-    // Копируем файл только если его там ещё нет
-    final localFile = File(pickedFile.path);
-    final file = File(destPath);
+    for (final pickedFile in pickedFiles) {
+      final filename = pickedFile.path.split('/').last;
+      final destPath = '${productDir.path}/$filename';
 
-    try {
-      if (!file.existsSync()) {
-        await localFile.copy(destPath);
-        print('[LOCAL] Файл скопирован: $destPath');
-      } else {
-        print('[LOCAL] Файл уже существует: $destPath');
+      final localFile = File(pickedFile.path);
+      final file = File(destPath);
+
+      try {
+        if (!file.existsSync()) {
+          await localFile.copy(destPath);
+          print('[LOCAL] Файл скопирован: $destPath');
+        } else {
+          print('[LOCAL] Файл уже существует: $destPath');
+        }
+      } catch (e) {
+        print('[LOCAL] ❌ Ошибка копирования файла: $e');
+        continue;
       }
-    } catch (e) {
-      print('[LOCAL] ❌ Ошибка копирования файла: $e');
-      return; // если копирование не удалось, не добавляем в UI
+
+      final newImg = ProductImage(
+        localPath: destPath,
+        productId: widget.productId,
+        isSynced: false,
+        isNew: true,
+      );
+
+      await _imageBox.add(newImg);
+
+      setState(() {
+        _images.add(newImg);
+      });
+
+      // Начинаем загрузку на сервер
+      _uploadImageToServer(newImg);
+      added++;
     }
 
-    final newImg = ProductImage(
-      localPath: destPath,
-      productId: widget.productId,
-      isSynced: false,
-      isNew: true,
-    );
-
-    // Сначала сохраняем в Hive
-    await _imageBox.add(newImg);
-
-    // После успешного сохранения добавляем в UI
-    setState(() {
-      _images.add(newImg);
-      _activeImageIndex = _images.length - 1;
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(_activeImageIndex);
-      }
-    });
-
-    // Начинаем загрузку на сервер
-    _uploadImageToServer(newImg);
+    if (added > 0) {
+      // Перейдём на первый добавленный
+      final target = startIndex;
+      _activeImageIndex = target;
+      if (_pageController.hasClients) _pageController.jumpToPage(target);
+    }
   }
 
   Future<void> _uploadImageToServer(ProductImage img) async {
@@ -373,6 +386,8 @@ class _ProductScreenState extends State<ProductScreen> {
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
+    final remainingHeight =
+        MediaQuery.of(context).size.height - 300 - topPadding;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
@@ -384,45 +399,50 @@ class _ProductScreenState extends State<ProductScreen> {
             child: Column(
               children: [
                 const SizedBox(height: 300),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.bgApp,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24),
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black12,
-                        blurRadius: 4,
-                        offset: Offset(0, -2),
-                      ),
-                    ],
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: remainingHeight > 0 ? remainingHeight : 0,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        TabButtons(
-                          activeTab: _activeTab,
-                          onTabChanged: (i) => setState(() => _activeTab = i),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.bgApp,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black12,
+                          blurRadius: 4,
+                          offset: Offset(0, -2),
                         ),
-                        const SizedBox(height: 20),
-                        _activeTab == 0
-                            ? InfoTab(
-                                title: widget.title,
-                                inventoryNumber: widget.inventoryNumber,
-                                price: widget.price,
-                                quantity: widget.quantity,
-                                total: widget.total,
-                                categoryPath: widget.categoryPath,
-                              )
-                            : HistoryTab(
-                                history: _history,
-                                loading: _loadingHistory,
-                              ),
-                        const SizedBox(height: 40),
                       ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TabButtons(
+                            activeTab: _activeTab,
+                            onTabChanged: (i) => setState(() => _activeTab = i),
+                          ),
+                          const SizedBox(height: 20),
+                          _activeTab == 0
+                              ? InfoTab(
+                                  title: widget.title,
+                                  inventoryNumber: widget.inventoryNumber,
+                                  price: widget.price,
+                                  quantity: widget.quantity,
+                                  total: widget.total,
+                                  categoryPath: widget.categoryPath,
+                                )
+                              : HistoryTab(
+                                  history: _history,
+                                  loading: _loadingHistory,
+                                ),
+                          const SizedBox(height: 40),
+                        ],
+                      ),
                     ),
                   ),
                 ),

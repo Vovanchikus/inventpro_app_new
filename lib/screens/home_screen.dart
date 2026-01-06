@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:testing_app/services/config.dart';
 import 'package:testing_app/services/image_sync_service.dart';
@@ -122,6 +123,42 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     try {
       statusText.value = 'Проверка сервера...';
+
+      // Быстрая проверка доступности сервера: если не отвечает за 5 секунд — показываем ошибку.
+      try {
+        final uri = Uri.parse('${Config.baseUrl}/api/categories');
+        final client = HttpClient()
+          ..badCertificateCallback =
+              (X509Certificate cert, String host, int port) => true;
+        final request = await client
+            .getUrl(uri)
+            .timeout(const Duration(seconds: 5));
+        final response = await request.close().timeout(
+          const Duration(seconds: 5),
+        );
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          throw Exception('HTTP ${response.statusCode}');
+        }
+        client.close();
+      } on TimeoutException catch (_) {
+        isError.value = true;
+        statusText.value = 'Не удалось связаться с сервером (тайм-аут 5 с).';
+        OverlayService.showMessage(
+          context,
+          'Не удалось связаться с сервером (тайм-аут 5 с).',
+          type: ToastType.error,
+        );
+        return;
+      } catch (e) {
+        isError.value = true;
+        statusText.value = 'Ошибка при проверке сервера:\n$e';
+        OverlayService.showMessage(
+          context,
+          'Ошибка при проверке сервера:\n$e',
+          type: ToastType.error,
+        );
+        return;
+      }
 
       // Категории
       statusText.value = 'Синхронизируем категории...';

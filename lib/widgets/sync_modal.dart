@@ -75,27 +75,31 @@ class _SyncModalState extends State<SyncModal>
                           );
                         },
                         child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(begin: 1.0 + _lastOverall * 0.08, end: 1.0 + overall * 0.08),
+                          tween: Tween<double>(
+                            begin: 1.0 + _lastOverall * 0.08,
+                            end: 1.0 + overall * 0.08,
+                          ),
                           duration: const Duration(milliseconds: 450),
                           curve: Curves.easeOutCubic,
                           onEnd: () => _lastOverall = overall,
                           builder: (context, scale, child) {
-                            return Transform.scale(
-                              scale: scale,
-                              child: child,
-                            );
+                            return Transform.scale(scale: scale, child: child);
                           },
                           child: Container(
                             width: 68,
                             height: 68,
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withOpacity(0.12),
+                              color: theme.colorScheme.primary.withOpacity(
+                                0.12,
+                              ),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               Icons.sync,
                               size: 36,
-                              color: error ? Colors.red : theme.colorScheme.primary,
+                              color: error
+                                  ? Colors.red
+                                  : theme.colorScheme.primary,
                             ),
                           ),
                         ),

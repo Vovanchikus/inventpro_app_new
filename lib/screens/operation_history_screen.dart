@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:testing_app/features/operations/presentation/views/operations_screen.dart';
 import 'package:testing_app/models/operation_type.dart';
 import 'package:intl/intl.dart';
 import '../theme/colors.dart';
@@ -394,6 +395,21 @@ class _OperationHistoryScreenState extends State<OperationHistoryScreen> {
 
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const OperationsScreen()),
+                );
+              },
+              icon: const Icon(Icons.auto_graph),
+              label: const Text('Новый экран истории (beta)'),
+            ),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(

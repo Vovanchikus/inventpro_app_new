@@ -12,7 +12,7 @@ import '../widgets/app_bottom_bar.dart';
 import 'home_screen.dart';
 import 'images_sync_center_screen.dart';
 import 'warehouse_screen.dart';
-import 'operation_history_screen.dart';
+import 'package:testing_app/features/operations/presentation/views/operations_screen.dart';
 import 'qr_screen.dart';
 import 'notifications_page.dart';
 
@@ -316,7 +316,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         children: [
           HomeScreen(key: homeKey),
           WarehouseScreen(key: warehouseKey),
-          OperationHistoryScreen(),
+          const OperationsScreen(),
           const Placeholder(),
         ],
       ),

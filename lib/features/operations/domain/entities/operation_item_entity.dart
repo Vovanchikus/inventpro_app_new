@@ -1,37 +1,12 @@
 import 'package:meta/meta.dart';
 
-/// Direction of stock movement.
-enum OperationFlow { inbound, outbound }
+const Map<int, int> operationPolarity = <int, int>{
+  1: 1, // Приход
+  2: -1, // Передача
+  3: -1, // Списание
+};
 
-/// Allows customizing what operation type IDs should be treated as inbound/outbound.
-class OperationTypePolarityResolver {
-  const OperationTypePolarityResolver({
-    this.inboundTypeIds = const <int>{},
-    this.outboundTypeIds = const <int>{},
-    this.defaultFlow = OperationFlow.outbound,
-  });
-
-  final Set<int> inboundTypeIds;
-  final Set<int> outboundTypeIds;
-  final OperationFlow defaultFlow;
-
-  OperationFlow resolve(int operationTypeId) {
-    if (inboundTypeIds.contains(operationTypeId)) {
-      return OperationFlow.inbound;
-    }
-    if (outboundTypeIds.contains(operationTypeId)) {
-      return OperationFlow.outbound;
-    }
-    return defaultFlow;
-  }
-}
-
-/// Shared default resolver. Update inbound/outbound sets once the server contracts are documented.
-const OperationTypePolarityResolver defaultPolarityResolver =
-    OperationTypePolarityResolver(
-      inboundTypeIds: <int>{4},
-      outboundTypeIds: <int>{},
-    );
+const int importOperationTypeId = 4;
 
 @immutable
 class OperationProductEntity {
@@ -76,13 +51,8 @@ class OperationItemEntity {
   final String? docName;
   final String? docNum;
 
-  OperationFlow flow({OperationTypePolarityResolver? resolver}) {
-    return (resolver ?? defaultPolarityResolver).resolve(operationTypeId);
-  }
-
-  double signedQuantity({OperationTypePolarityResolver? resolver}) {
-    final effectiveResolver = resolver ?? defaultPolarityResolver;
-    final direction = effectiveResolver.resolve(operationTypeId);
-    return direction == OperationFlow.inbound ? quantity : -quantity;
+  double signedQuantity() {
+    final multiplier = operationPolarity[operationTypeId] ?? -1;
+    return quantity * multiplier;
   }
 }

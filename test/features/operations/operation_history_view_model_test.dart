@@ -1,48 +1,80 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/foundation.dart';
+import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:testing_app/boxes/hive_boxes.dart';
+import 'package:testing_app/features/operations/data/models/operation_history_cache_entry.dart';
 import 'package:testing_app/features/operations/data/models/operation_history_item_dto.dart';
 import 'package:testing_app/features/operations/data/repositories/operation_history_repository.dart';
 import 'package:testing_app/features/operations/domain/usecases/operation_history_usecases.dart';
 import 'package:testing_app/features/operations/presentation/viewmodels/operation_history_view_model.dart';
+import 'package:testing_app/services/sync_service.dart';
 
 void main() {
+  Directory? tempDir;
+
+  setUpAll(() async {
+    tempDir = await Directory.systemTemp.createTemp('operations_history_test');
+    Hive.init(tempDir!.path);
+    final adapter = OperationHistoryCacheEntryAdapter();
+    if (!Hive.isAdapterRegistered(adapter.typeId)) {
+      Hive.registerAdapter(adapter);
+    }
+    await Hive.openBox<OperationHistoryCacheEntry>(HiveBoxes.operationsHistory);
+  });
+
+  tearDownAll(() async {
+    await Hive.close();
+    if (tempDir != null && await tempDir!.exists()) {
+      await tempDir!.delete(recursive: true);
+    }
+  });
+
   group('OperationHistoryViewModel', () {
     late FakeOperationHistoryRepository repository;
+    late FakeOperationsHistorySyncService syncService;
     late OperationHistoryViewModel viewModel;
 
     setUp(() {
       repository = FakeOperationHistoryRepository(_sampleItems);
-      viewModel = OperationHistoryViewModel(repository: repository);
+      syncService = FakeOperationsHistorySyncService(repository);
+      viewModel = OperationHistoryViewModel(
+        repository: repository,
+        syncBridge: syncService,
+      );
     });
 
     tearDown(() {
       viewModel.dispose();
+      syncService.dispose();
     });
 
-    test('loadHistory converts and groups data with proper signs', () async {
+    test('loadHistory converts and groups data with polarity map', () async {
       await viewModel.loadHistory();
 
       expect(viewModel.originalData.length, _sampleItems.length);
       expect(viewModel.groupedData, isNotEmpty);
-      expect(viewModel.counteragentTotals['Partner A'], closeTo(17, 0.001));
-      expect(viewModel.counteragentTotals['Partner B'], closeTo(-5, 0.001));
+      expect(viewModel.isOffline, isFalse);
 
-      final inbound = viewModel.groupedData
+      final arrival = viewModel.groupedData
           .expand((group) => group.operations.values)
           .expand((items) => items)
-          .where((item) => item.entity.operationTypeId == 4)
+          .where((item) => item.entity.operationTypeId == 1)
           .first;
-      expect(inbound.signSymbol, equals('+'));
-      expect(inbound.signedQuantity, greaterThan(0));
+      expect(arrival.signSymbol, equals('+'));
+      expect(arrival.signedQuantity, greaterThan(0));
 
-      final outbound = viewModel.groupedData
+      final writeOff = viewModel.groupedData
           .expand((group) => group.operations.values)
           .expand((items) => items)
-          .where((item) => item.entity.operationTypeId == 2)
+          .where((item) => item.entity.operationTypeId == 3)
           .first;
-      expect(outbound.signSymbol, equals('-'));
-      expect(outbound.signedQuantity, lessThan(0));
+      expect(writeOff.signSymbol, equals('-'));
+      expect(writeOff.signedQuantity, lessThan(0));
     });
 
     test('applyFilters filters by year and type', () async {
@@ -54,12 +86,12 @@ void main() {
         isTrue,
       );
 
-      viewModel.applyFilters(const OperationHistoryFilters(operationTypeId: 4));
+      viewModel.applyFilters(const OperationHistoryFilters(operationTypeId: 1));
       expect(
         viewModel.groupedData
             .expand((group) => group.operations.values)
             .expand((items) => items)
-            .every((item) => item.entity.operationTypeId == 4),
+            .every((item) => item.entity.operationTypeId == 1),
         isTrue,
       );
     });
@@ -77,18 +109,56 @@ void main() {
       );
       expect(viewModel.filters.isEmpty, isTrue);
     });
+
+    test('loadHistory does not trigger sync service directly', () async {
+      await viewModel.loadHistory();
+      expect(syncService.callCount, equals(0));
+    });
+
+    test('isOffline toggles after external sync uses cache fallback', () async {
+      await viewModel.loadHistory();
+      repository.stateOverride = OperationHistoryFetchState.offline(
+        _sampleItems.length,
+      );
+
+      await syncService.syncOperationsHistory();
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.isOffline, isTrue);
+    });
+
+    test('available operation types exclude import type', () async {
+      await viewModel.loadHistory();
+
+      expect(
+        viewModel.availableOperationTypes.every((option) => option.id != 4),
+        isTrue,
+      );
+    });
   });
 }
 
 class FakeOperationHistoryRepository extends OperationHistoryRepository {
   FakeOperationHistoryRepository(this._items)
-    : super(baseUrl: 'http://localhost', httpClient: http.Client());
+    : super(baseUrl: 'http://localhost', httpClient: http.Client()) {
+    _cached = List<OperationHistoryItemDto>.from(_items);
+  }
 
   final List<OperationHistoryItemDto> _items;
+  OperationHistoryFetchState? stateOverride;
+  late List<OperationHistoryItemDto> _cached;
 
   @override
   Future<List<OperationHistoryItemDto>> fetchHistory() async {
+    final snapshot =
+        stateOverride ?? OperationHistoryFetchState.success(_items.length);
+    debugSetState(snapshot);
+    _cached = List<OperationHistoryItemDto>.from(_items);
     return _items;
+  }
+
+  @override
+  List<OperationHistoryItemDto> loadCachedHistory() {
+    return _cached;
   }
 
   @override
@@ -108,8 +178,8 @@ const _sampleItems = <OperationHistoryItemDto>[
       price: 38.74,
     ),
     operationId: 100,
-    operationTypeId: 4,
-    operationTypeName: 'Импорт',
+    operationTypeId: 1,
+    operationTypeName: 'Приход',
     counteragent: 'Partner A',
     quantity: 10,
     docDate: '2024-01-15',
@@ -127,7 +197,7 @@ const _sampleItems = <OperationHistoryItemDto>[
     ),
     operationId: 101,
     operationTypeId: 2,
-    operationTypeName: 'Расход',
+    operationTypeName: 'Передача',
     counteragent: 'Partner B',
     quantity: 5,
     docDate: '2024-02-20',
@@ -144,12 +214,65 @@ const _sampleItems = <OperationHistoryItemDto>[
       price: 30,
     ),
     operationId: 102,
-    operationTypeId: 4,
-    operationTypeName: 'Импорт',
-    counteragent: 'Partner A',
+    operationTypeId: 3,
+    operationTypeName: 'Списание',
+    counteragent: 'Partner C',
     quantity: 7,
     docDate: '2023-12-11',
     docName: 'ТОРГ-12',
     docNum: '003',
   ),
+  OperationHistoryItemDto(
+    id: 4,
+    product: OperationHistoryProductDto(
+      id: 13,
+      name: 'Fuel Import',
+      unit: 'л',
+      inventoryNumber: 'INV-4',
+      price: 52,
+    ),
+    operationId: 103,
+    operationTypeId: 4,
+    operationTypeName: 'Импорт',
+    counteragent: 'Partner D',
+    quantity: 4,
+    docDate: '2024-03-05',
+    docName: 'ТОРГ-12',
+    docNum: '004',
+  ),
 ];
+
+class FakeOperationsHistorySyncService implements OperationsHistorySyncBridge {
+  FakeOperationsHistorySyncService(this.repository);
+
+  final OperationHistoryRepository repository;
+  final ValueNotifier<bool> _isSyncing = ValueNotifier(false);
+  final StreamController<void> _controller = StreamController.broadcast();
+  Duration syncDelay = Duration.zero;
+  int callCount = 0;
+
+  @override
+  ValueListenable<bool> get isSyncingOperationsHistory => _isSyncing;
+
+  @override
+  Stream<void> get operationsHistoryUpdates => _controller.stream;
+
+  @override
+  Future<void> syncOperationsHistory({int retries = 2}) async {
+    _isSyncing.value = true;
+    try {
+      callCount++;
+      if (syncDelay > Duration.zero) {
+        await Future.delayed(syncDelay);
+      }
+      await repository.fetchHistory();
+      _controller.add(null);
+    } finally {
+      _isSyncing.value = false;
+    }
+  }
+
+  void dispose() {
+    _controller.close();
+  }
+}

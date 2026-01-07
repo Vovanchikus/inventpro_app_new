@@ -14,6 +14,7 @@ import 'models/operation.dart';
 import 'models/operation_product.dart';
 import 'models/document.dart';
 import 'models/notification_model.dart';
+import 'features/operations/data/models/operation_history_cache_entry.dart';
 
 // Импорт Box helper
 import 'boxes/hive_boxes.dart';
@@ -33,6 +34,7 @@ void main() async {
   Hive.registerAdapter(OperationProductAdapter());
   Hive.registerAdapter(DocumentAdapter());
   Hive.registerAdapter(ProductImageAdapter());
+  Hive.registerAdapter(OperationHistoryCacheEntryAdapter());
   // Notification adapters (generated)
   Hive.registerAdapter(NotificationTypeAdapter());
   Hive.registerAdapter(NotificationActionAdapter());

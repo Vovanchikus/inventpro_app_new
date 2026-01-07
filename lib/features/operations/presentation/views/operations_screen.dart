@@ -4,6 +4,7 @@ import 'package:testing_app/features/operations/domain/usecases/operation_histor
 import 'package:testing_app/features/operations/presentation/viewmodels/operation_history_view_model.dart';
 import 'package:testing_app/features/operations/presentation/widgets/operation_history_card.dart';
 import 'package:testing_app/features/operations/data/repositories/operation_history_repository.dart';
+import 'package:testing_app/services/sync_service.dart';
 import 'package:testing_app/theme/colors.dart';
 
 class OperationsScreen extends StatefulWidget {
@@ -21,6 +22,7 @@ class _OperationsScreenState extends State<OperationsScreen> {
     super.initState();
     _viewModel = OperationHistoryViewModel(
       repository: OperationHistoryRepository(),
+      syncBridge: SyncService.instance,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _viewModel.loadHistory();
@@ -35,23 +37,11 @@ class _OperationsScreenState extends State<OperationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bgApp,
-      appBar: AppBar(
-        title: const Text('История операций (новая)'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _viewModel.isLoading ? null : _viewModel.loadHistory,
-          ),
-        ],
-      ),
-      body: AnimatedBuilder(
+    return ColoredBox(
+      color: AppColors.bgApp,
+      child: AnimatedBuilder(
         animation: _viewModel,
-        builder: (_, __) => RefreshIndicator(
-          onRefresh: _viewModel.loadHistory,
-          child: _buildBody(),
-        ),
+        builder: (_, __) => _buildBody(),
       ),
     );
   }
@@ -85,10 +75,11 @@ class _OperationsScreenState extends State<OperationsScreen> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _viewModel.loadHistory,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Попробовать снова'),
+          Text(
+            'История обновляется автоматически при запуске приложения и через кнопку синхронизации в AppBar.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700),
           ),
         ],
       );
@@ -107,25 +98,15 @@ class _OperationsScreenState extends State<OperationsScreen> {
     }
 
     final groups = _viewModel.groupedData;
+    final sections = <Widget>[
+      if (_viewModel.isOffline) const _OfflineBanner(),
+      if (_viewModel.isSyncing) const _SyncingIndicator(),
+      _FiltersPanel(viewModel: _viewModel, onFilterChanged: _applyFilter),
+    ];
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      physics: const AlwaysScrollableScrollPhysics(),
-      itemCount: groups.length + 2,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _FiltersPanel(
-            viewModel: _viewModel,
-            onFilterChanged: _applyFilter,
-          );
-        }
-        if (index == 1) {
-          return _CounteragentSummary(
-            counteragentTotals: _viewModel.counteragentTotals,
-          );
-        }
-        final group = groups[index - 2];
-        return Padding(
+    for (final group in groups) {
+      sections.add(
+        Padding(
           padding: const EdgeInsets.only(bottom: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,8 +129,14 @@ class _OperationsScreenState extends State<OperationsScreen> {
               ),
             ],
           ),
-        );
-      },
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: sections,
     );
   }
 
@@ -312,56 +299,75 @@ class _DropdownFilter<T> extends StatelessWidget {
   }
 }
 
-class _CounteragentSummary extends StatelessWidget {
-  const _CounteragentSummary({required this.counteragentTotals});
-
-  final Map<String, double> counteragentTotals;
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner();
 
   @override
   Widget build(BuildContext context) {
-    if (counteragentTotals.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
+      color: Colors.orange.shade50,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Сальдо по контрагентам',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: counteragentTotals.entries.map((entry) {
-                final value = entry.value;
-                final sign = value >= 0 ? '+' : '-';
-                return Chip(
-                  avatar: CircleAvatar(
-                    backgroundColor: value >= 0
-                        ? Colors.green.shade100
-                        : Colors.red.shade100,
-                    child: Text(
-                      sign,
-                      style: TextStyle(
-                        color: value >= 0
-                            ? Colors.green.shade800
-                            : Colors.red.shade800,
-                        fontWeight: FontWeight.bold,
-                      ),
+            Row(
+              children: [
+                Icon(Icons.wifi_off, color: Colors.orange.shade700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Нет подключения к сети',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.orange.shade800,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  label: Text(
-                    '${entry.key}: ${value.abs().toStringAsFixed(2)}',
-                  ),
-                );
-              }).toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Нет подключения к сети — отображаются последние данные. Обновите данные через синхронизацию в верхнем AppBar.',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SyncingIndicator extends StatelessWidget {
+  const _SyncingIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Синхронизация истории операций... данные остаются доступными.',
+                style: theme.textTheme.bodyMedium,
+              ),
             ),
           ],
         ),

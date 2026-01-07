@@ -43,9 +43,7 @@ class OperationHistoryFilters {
 }
 
 class OperationHistoryUseCases {
-  const OperationHistoryUseCases({this.resolver});
-
-  final OperationTypePolarityResolver? resolver;
+  const OperationHistoryUseCases();
 
   List<OperationItemEntity> applyFilters(
     List<OperationItemEntity> items,
@@ -84,17 +82,5 @@ class OperationHistoryUseCases {
           .add(item);
     }
     return grouped;
-  }
-
-  Map<String, double> aggregateCounteragents(List<OperationItemEntity> items) {
-    final map = <String, double>{};
-    for (final item in items) {
-      final key = item.counteragent.trim().isEmpty
-          ? 'Не указан'
-          : item.counteragent.trim();
-      final signed = item.signedQuantity(resolver: resolver);
-      map.update(key, (value) => value + signed, ifAbsent: () => signed);
-    }
-    return map;
   }
 }

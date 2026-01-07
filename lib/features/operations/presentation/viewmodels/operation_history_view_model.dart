@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import 'package:testing_app/services/sync_service.dart';
 
 import '../../../operations/data/models/operation_history_item_dto.dart';
 import '../../../operations/data/repositories/operation_history_repository.dart';
@@ -37,26 +39,40 @@ class OperationTypeOption {
 class OperationHistoryViewModel extends ChangeNotifier {
   OperationHistoryViewModel({
     required OperationHistoryRepository repository,
+    required OperationsHistorySyncBridge syncBridge,
     OperationHistoryUseCases? useCases,
-    OperationTypePolarityResolver? resolver,
   }) : _repository = repository,
-       _resolver = resolver ?? defaultPolarityResolver,
-       _useCases =
-           useCases ??
-           OperationHistoryUseCases(
-             resolver: resolver ?? defaultPolarityResolver,
-           );
+       _syncService = syncBridge,
+       _useCases = useCases ?? const OperationHistoryUseCases() {
+    _isSyncing = _syncService.isSyncingOperationsHistory.value;
+    _syncingListener = () {
+      final syncing = _syncService.isSyncingOperationsHistory.value;
+      if (_isSyncing == syncing) {
+        return;
+      }
+      _isSyncing = syncing;
+      notifyListeners();
+    };
+    _syncService.isSyncingOperationsHistory.addListener(_syncingListener!);
+    _operationsHistorySubscription = _syncService.operationsHistoryUpdates
+        .listen((_) {
+          _loadFromCache();
+        });
+  }
 
   final OperationHistoryRepository _repository;
+  final OperationsHistorySyncBridge _syncService;
   final OperationHistoryUseCases _useCases;
-  final OperationTypePolarityResolver _resolver;
+  StreamSubscription<void>? _operationsHistorySubscription;
+  VoidCallback? _syncingListener;
 
   bool _isLoading = false;
   List<OperationHistoryItemDto> _originalData = const [];
   List<OperationHistoryGroup> _groupedData = const [];
-  Map<String, double> _counteragentTotals = const {};
   OperationHistoryFilters _filters = const OperationHistoryFilters();
   String? _error;
+  bool _isOffline = false;
+  bool _isSyncing = false;
   List<int> _availableYears = const [];
   List<OperationTypeOption> _availableOperationTypes = const [];
   List<String> _availableCounteragents = const [];
@@ -64,9 +80,10 @@ class OperationHistoryViewModel extends ChangeNotifier {
   bool get isLoading => _isLoading;
   List<OperationHistoryItemDto> get originalData => _originalData;
   List<OperationHistoryGroup> get groupedData => _groupedData;
-  Map<String, double> get counteragentTotals => _counteragentTotals;
   OperationHistoryFilters get filters => _filters;
   String? get error => _error;
+  bool get isOffline => _isOffline;
+  bool get isSyncing => _isSyncing;
   List<int> get availableYears => _availableYears;
   List<OperationTypeOption> get availableOperationTypes =>
       _availableOperationTypes;
@@ -75,28 +92,15 @@ class OperationHistoryViewModel extends ChangeNotifier {
   Future<void> loadHistory() async {
     _setLoading(true);
     _error = null;
-
-    try {
-      final dtoList = await _repository.fetchHistory();
-      _originalData = dtoList;
-      final entities = dtoList.map(_mapDtoToEntity).toList(growable: false);
-      _recalculateAvailableFilters(entities);
-      _applyFiltersInternal(entities, _filters);
-    } catch (error) {
-      _error = error.toString();
-      _groupedData = const [];
-      _counteragentTotals = const {};
-      notifyListeners();
-    } finally {
-      _setLoading(false);
-    }
+    _loadFromCache();
+    _setLoading(false);
   }
 
   void applyFilters(OperationHistoryFilters filters) {
-    _filters = filters;
+    _filters = _sanitizeFilters(filters);
     final entities = _originalData.map(_mapDtoToEntity).toList(growable: false);
     _recalculateAvailableFilters(entities);
-    _applyFiltersInternal(entities, filters);
+    _applyFiltersInternal(entities, _filters);
   }
 
   void resetFilters() {
@@ -109,7 +113,6 @@ class OperationHistoryViewModel extends ChangeNotifier {
   ) {
     final filtered = _useCases.applyFilters(entities, filters);
     _groupedData = _buildGroupedData(filtered);
-    _counteragentTotals = _useCases.aggregateCounteragents(filtered);
     _error = null;
     notifyListeners();
   }
@@ -134,7 +137,7 @@ class OperationHistoryViewModel extends ChangeNotifier {
       for (final entry in sortedEntries) {
         final uiItems = entry.value
             .map((entity) {
-              final signed = entity.signedQuantity(resolver: _resolver);
+              final signed = entity.signedQuantity();
               return OperationItemUiModel(
                 entity: entity,
                 signedQuantity: signed,
@@ -159,7 +162,8 @@ class OperationHistoryViewModel extends ChangeNotifier {
       if (docYear != null) {
         years.add(docYear);
       }
-      if (entity.operationTypeId != 0) {
+      if (entity.operationTypeId != 0 &&
+          entity.operationTypeId != importOperationTypeId) {
         typeNames[entity.operationTypeId] = entity.operationTypeName;
       }
       final normalizedCounteragent = entity.counteragent.trim().isEmpty
@@ -180,18 +184,59 @@ class OperationHistoryViewModel extends ChangeNotifier {
     _availableOperationTypes = typeOptions;
     _availableCounteragents = counteragents.toList()
       ..sort((a, b) => a.compareTo(b));
+
+    if (_filters.operationTypeId == importOperationTypeId) {
+      _filters = OperationHistoryFilters(
+        year: _filters.year,
+        counteragent: _filters.counteragent,
+      );
+    }
   }
 
   @override
   void dispose() {
     _repository.dispose();
+    _operationsHistorySubscription?.cancel();
+    if (_syncingListener != null) {
+      _syncService.isSyncingOperationsHistory.removeListener(_syncingListener!);
+    }
     super.dispose();
+  }
+
+  OperationHistoryFilters _sanitizeFilters(OperationHistoryFilters filters) {
+    if (filters.operationTypeId == importOperationTypeId) {
+      return OperationHistoryFilters(
+        year: filters.year,
+        counteragent: filters.counteragent,
+      );
+    }
+    return filters;
   }
 
   void _setLoading(bool value) {
     if (_isLoading == value) return;
     _isLoading = value;
     notifyListeners();
+  }
+
+  bool _loadFromCache() {
+    final cached = _repository.loadCachedHistory();
+    _isOffline = _repository.state.status == OperationHistoryLoadStatus.offline;
+    if (cached.isEmpty) {
+      _originalData = const [];
+      _groupedData = const [];
+      _availableYears = const [];
+      _availableOperationTypes = const [];
+      _availableCounteragents = const [];
+      notifyListeners();
+      return false;
+    }
+    _originalData = cached;
+    final entities = cached.map(_mapDtoToEntity).toList(growable: false);
+    _recalculateAvailableFilters(entities);
+    _applyFiltersInternal(entities, _filters);
+    _error = null;
+    return true;
   }
 
   OperationItemEntity _mapDtoToEntity(OperationHistoryItemDto dto) {

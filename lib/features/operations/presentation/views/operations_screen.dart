@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 
-import 'package:testing_app/features/operations/domain/usecases/operation_history_usecases.dart';
 import 'package:testing_app/features/operations/presentation/viewmodels/operation_history_view_model.dart';
 import 'package:testing_app/features/operations/presentation/widgets/operation_history_card.dart';
+import 'package:testing_app/features/operations/presentation/widgets/filters_bottom_sheet.dart';
 import 'package:testing_app/features/operations/data/repositories/operation_history_repository.dart';
 import 'package:testing_app/services/sync_service.dart';
 import 'package:testing_app/theme/colors.dart';
@@ -16,6 +17,8 @@ class OperationsScreen extends StatefulWidget {
 
 class _OperationsScreenState extends State<OperationsScreen> {
   late final OperationHistoryViewModel _viewModel;
+  late final TextEditingController _searchController;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -24,6 +27,9 @@ class _OperationsScreenState extends State<OperationsScreen> {
       repository: OperationHistoryRepository(),
       syncBridge: SyncService.instance,
     );
+    _searchController = TextEditingController(
+      text: _viewModel.searchQuery ?? '',
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _viewModel.loadHistory();
     });
@@ -31,6 +37,8 @@ class _OperationsScreenState extends State<OperationsScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
     _viewModel.dispose();
     super.dispose();
   }
@@ -41,12 +49,158 @@ class _OperationsScreenState extends State<OperationsScreen> {
       color: AppColors.bgApp,
       child: AnimatedBuilder(
         animation: _viewModel,
-        builder: (_, __) => _buildBody(),
+        builder: (context, _) => _buildBody(context),
       ),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(BuildContext context) {
+    return Column(
+      children: [
+        _buildHeader(context),
+        Expanded(child: _buildContentArea(context)),
+      ],
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final searchField = _viewModel.searchField;
+    final hint = searchField == SearchField.product
+        ? 'Поиск по товарам'
+        : 'Поиск по документам';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(0),
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _SearchToggleIcon(
+                          tooltip: 'Товар',
+                          icon: Icons.shopping_bag,
+                          selected: searchField == SearchField.product,
+                          onTap: () => _viewModel.applySearch(
+                            _searchController.text,
+                            SearchField.product,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        _SearchToggleIcon(
+                          tooltip: 'Документ',
+                          icon: Icons.receipt_long,
+                          selected: searchField == SearchField.document,
+                          onTap: () => _viewModel.applySearch(
+                            _searchController.text,
+                            SearchField.document,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                onChanged: (v) {
+                  _searchDebounce?.cancel();
+                  _searchDebounce = Timer(
+                    const Duration(milliseconds: 250),
+                    () {
+                      _viewModel.applySearch(v, _viewModel.searchField);
+                    },
+                  );
+                },
+                onSubmitted: (v) =>
+                    _viewModel.applySearch(v, _viewModel.searchField),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 48,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: () async {
+                _viewModel.openFiltersSheet();
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (ctx) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                    ),
+                    child: Wrap(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surface,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(24),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8, bottom: 24),
+                            child: FiltersBottomSheet(
+                              initialFilters: _viewModel.filters,
+                              availableYears: _viewModel.availableYears,
+                              availableOperationTypes:
+                                  _viewModel.availableOperationTypes,
+                              availableCounteragents:
+                                  _viewModel.availableCounteragents,
+                              onApply: (f) {
+                                _viewModel.applyFilters(f);
+                                Navigator.of(ctx).pop();
+                              },
+                              onReset: () {
+                                _viewModel.resetFilters();
+                                Navigator.of(ctx).pop();
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+                _viewModel.closeFiltersSheet();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.bgLight,
+                shape: const CircleBorder(),
+                padding: const EdgeInsets.all(12),
+                elevation: 6,
+                shadowColor: AppColors.brand.withOpacity(0.25),
+              ),
+              child: const Icon(
+                Icons.filter_list,
+                color: AppColors.textTitle,
+                size: 24,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContentArea(BuildContext context) {
     if (_viewModel.isLoading && _viewModel.groupedData.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -85,52 +239,56 @@ class _OperationsScreenState extends State<OperationsScreen> {
       );
     }
 
-    if (_viewModel.groupedData.isEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
-        children: const [
-          Icon(Icons.inbox, size: 48, color: Colors.grey),
-          SizedBox(height: 12),
-          Text('История операций пуста'),
-        ],
-      );
-    }
-
-    final groups = _viewModel.groupedData;
     final sections = <Widget>[
       if (_viewModel.isOffline) const _OfflineBanner(),
       if (_viewModel.isSyncing) const _SyncingIndicator(),
-      _FiltersPanel(viewModel: _viewModel, onFilterChanged: _applyFilter),
     ];
 
-    for (final group in groups) {
+    if (_viewModel.groupedData.isEmpty) {
       sections.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                group.year.toString(),
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              ...group.operations.entries.map(
-                (entry) => Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: OperationHistoryCard(
-                    operationId: entry.key,
-                    items: entry.value,
-                  ),
-                ),
-              ),
-            ],
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 80),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.inbox, size: 48, color: Colors.grey),
+                SizedBox(height: 12),
+                Text('История операций пуста'),
+              ],
+            ),
           ),
         ),
       );
+    } else {
+      for (final group in _viewModel.groupedData) {
+        sections.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  group.year.toString(),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                ...group.operations.entries.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: OperationHistoryCard(
+                      operationId: entry.key,
+                      items: entry.value,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
     }
 
     return ListView(
@@ -139,161 +297,59 @@ class _OperationsScreenState extends State<OperationsScreen> {
       children: sections,
     );
   }
-
-  void _applyFilter(OperationHistoryFilters filters) {
-    _viewModel.applyFilters(filters);
-  }
 }
 
-class _FiltersPanel extends StatelessWidget {
-  const _FiltersPanel({required this.viewModel, required this.onFilterChanged});
-
-  final OperationHistoryViewModel viewModel;
-  final ValueChanged<OperationHistoryFilters> onFilterChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final filters = viewModel.filters;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Фильтры', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _DropdownFilter<int?>(
-                  label: 'Год',
-                  value: filters.year,
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Все годы'),
-                    ),
-                    ...viewModel.availableYears
-                        .map(
-                          (year) => DropdownMenuItem<int?>(
-                            value: year,
-                            child: Text(year.toString()),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                  onChanged: (year) => onFilterChanged(
-                    OperationHistoryFilters(
-                      year: year,
-                      operationTypeId: filters.operationTypeId,
-                      counteragent: filters.counteragent,
-                    ),
-                  ),
-                ),
-                _DropdownFilter<int?>(
-                  label: 'Тип операции',
-                  value: filters.operationTypeId,
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Все типы'),
-                    ),
-                    ...viewModel.availableOperationTypes
-                        .map(
-                          (option) => DropdownMenuItem<int?>(
-                            value: option.id,
-                            child: Text(option.name),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                  onChanged: (typeId) => onFilterChanged(
-                    OperationHistoryFilters(
-                      year: filters.year,
-                      operationTypeId: typeId,
-                      counteragent: filters.counteragent,
-                    ),
-                  ),
-                ),
-                _DropdownFilter<String?>(
-                  label: 'Контрагент',
-                  value: filters.counteragent,
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Все контрагенты'),
-                    ),
-                    ...viewModel.availableCounteragents
-                        .map(
-                          (counteragent) => DropdownMenuItem<String?>(
-                            value: counteragent,
-                            child: Text(counteragent),
-                          ),
-                        )
-                        .toList(),
-                  ],
-                  onChanged: (counteragent) => onFilterChanged(
-                    OperationHistoryFilters(
-                      year: filters.year,
-                      operationTypeId: filters.operationTypeId,
-                      counteragent: counteragent,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: filters.isEmpty ? null : viewModel.resetFilters,
-                icon: const Icon(Icons.clear),
-                label: const Text('Сбросить'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DropdownFilter<T> extends StatelessWidget {
-  const _DropdownFilter({
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
+class _SearchToggleIcon extends StatelessWidget {
+  const _SearchToggleIcon({
+    required this.selected,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
   });
 
-  final String label;
-  final T value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?> onChanged;
+  final bool selected;
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 220,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 4),
-          DropdownButtonFormField<T>(
-            value: value,
-            items: items,
-            onChanged: onChanged,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+    final iconColor = selected ? Colors.white : AppColors.textBody;
+    final bg = selected ? AppColors.brand : Colors.transparent;
+    return Tooltip(
+      message: tooltip,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeInOut,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: AppColors.brand.withOpacity(0.22),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+          border: Border.all(
+            color: selected
+                ? AppColors.brand
+                : AppColors.textBody.withOpacity(0.12),
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(icon, size: 20, color: iconColor),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

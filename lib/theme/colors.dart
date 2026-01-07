@@ -9,6 +9,7 @@ class AppColors {
   static const Color brand = Color(0xFF5B86CA);
   static const Color success = Color(0xFF48A53B);
   static const Color error = Color(0xFFE93850);
+  static const Color warning = Color(0xFFF48B1E);
 
   // === Цвет Текста ===
 

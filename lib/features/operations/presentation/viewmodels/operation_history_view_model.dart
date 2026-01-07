@@ -36,6 +36,8 @@ class OperationTypeOption {
   final String name;
 }
 
+enum SearchField { document, product }
+
 class OperationHistoryViewModel extends ChangeNotifier {
   OperationHistoryViewModel({
     required OperationHistoryRepository repository,
@@ -76,6 +78,11 @@ class OperationHistoryViewModel extends ChangeNotifier {
   List<int> _availableYears = const [];
   List<OperationTypeOption> _availableOperationTypes = const [];
   List<String> _availableCounteragents = const [];
+  // Search state
+  String? _searchQuery;
+  SearchField _searchField = SearchField.document;
+  // UI state for filters sheet
+  bool _isFiltersSheetOpen = false;
 
   bool get isLoading => _isLoading;
   List<OperationHistoryItemDto> get originalData => _originalData;
@@ -88,6 +95,9 @@ class OperationHistoryViewModel extends ChangeNotifier {
   List<OperationTypeOption> get availableOperationTypes =>
       _availableOperationTypes;
   List<String> get availableCounteragents => _availableCounteragents;
+  String? get searchQuery => _searchQuery;
+  SearchField get searchField => _searchField;
+  bool get isFiltersSheetOpen => _isFiltersSheetOpen;
 
   Future<void> loadHistory() async {
     _setLoading(true);
@@ -100,7 +110,7 @@ class OperationHistoryViewModel extends ChangeNotifier {
     _filters = _sanitizeFilters(filters);
     final entities = _originalData.map(_mapDtoToEntity).toList(growable: false);
     _recalculateAvailableFilters(entities);
-    _applyFiltersInternal(entities, _filters);
+    _applyFiltersInternal(entities, _filters, _searchQuery, _searchField);
   }
 
   void resetFilters() {
@@ -110,11 +120,51 @@ class OperationHistoryViewModel extends ChangeNotifier {
   void _applyFiltersInternal(
     List<OperationItemEntity> entities,
     OperationHistoryFilters filters,
+    String? searchQuery,
+    SearchField searchField,
   ) {
-    final filtered = _useCases.applyFilters(entities, filters);
+    var filtered = _useCases.applyFilters(entities, filters);
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      filtered = filtered
+          .where((item) {
+            if (searchField == SearchField.document) {
+              final docName = (item.docName ?? '').toLowerCase();
+              final docNum = (item.docNum ?? '').toLowerCase();
+              return docName.contains(q) || docNum.contains(q);
+            } else {
+              final product = item.product.name.toLowerCase();
+              return product.contains(q);
+            }
+          })
+          .toList(growable: false);
+    }
     _groupedData = _buildGroupedData(filtered);
     _error = null;
     notifyListeners();
+  }
+
+  /// Apply search without changing filters.
+  void applySearch(String? query, SearchField field) {
+    _searchQuery = query;
+    _searchField = field;
+    final entities = _originalData.map(_mapDtoToEntity).toList(growable: false);
+    _recalculateAvailableFilters(entities);
+    _applyFiltersInternal(entities, _filters, _searchQuery, _searchField);
+  }
+
+  void openFiltersSheet() {
+    if (!_isFiltersSheetOpen) {
+      _isFiltersSheetOpen = true;
+      notifyListeners();
+    }
+  }
+
+  void closeFiltersSheet() {
+    if (_isFiltersSheetOpen) {
+      _isFiltersSheetOpen = false;
+      notifyListeners();
+    }
   }
 
   List<OperationHistoryGroup> _buildGroupedData(
@@ -234,7 +284,7 @@ class OperationHistoryViewModel extends ChangeNotifier {
     _originalData = cached;
     final entities = cached.map(_mapDtoToEntity).toList(growable: false);
     _recalculateAvailableFilters(entities);
-    _applyFiltersInternal(entities, _filters);
+    _applyFiltersInternal(entities, _filters, _searchQuery, _searchField);
     _error = null;
     return true;
   }

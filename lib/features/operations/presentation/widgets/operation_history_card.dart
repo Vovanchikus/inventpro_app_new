@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'package:testing_app/theme/colors.dart';
+
 import '../viewmodels/operation_history_view_model.dart';
 import '../../domain/entities/operation_item_entity.dart';
 
@@ -21,11 +23,12 @@ class OperationHistoryCard extends StatelessWidget {
     if (items.isEmpty) {
       return const SizedBox.shrink();
     }
-
     final primary = items.first.entity;
     final theme = Theme.of(context);
     final dateLabel = _formatDate(primary.docDate);
-    final docLabel = _formatDocument(primary);
+    final docTitle = _formatDocumentTitle(primary);
+
+    final chipColor = _colorForOperationType(primary.operationTypeId);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -44,43 +47,58 @@ class OperationHistoryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
+              // Operation type chip
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: chipColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: Text(
                   primary.operationTypeName,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: chipColor,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
+              const Spacer(),
+              // Date on the right
               Text(
-                '#$operationId',
+                dateLabel,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.hintColor,
+                  color: theme.colorScheme.primary,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 10),
+
+          // Document title (big) + optional number
           Text(
-            dateLabel,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.primary,
+            docTitle,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          // Counteragent
           Text(
-            'Контрагент: ${primary.counteragent.isEmpty ? 'Не указан' : primary.counteragent}',
-            style: theme.textTheme.bodyMedium,
+            'Контрагент: ${primary.counteragent.trim().isEmpty ? 'Не указан' : primary.counteragent}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textSubTitle,
+            ),
           ),
-          if (docLabel != null) ...[
-            const SizedBox(height: 4),
-            Text(docLabel, style: theme.textTheme.bodySmall),
-          ],
           const SizedBox(height: 12),
           const Divider(),
           const SizedBox(height: 12),
+
+          // Products
           ...items.map((uiModel) => _ProductRow(model: uiModel)),
         ],
       ),
@@ -94,18 +112,29 @@ class OperationHistoryCard extends StatelessWidget {
     return DateFormat('dd.MM.yyyy').format(date);
   }
 
-  String? _formatDocument(OperationItemEntity entity) {
-    final parts = <String>[];
-    if ((entity.docName ?? '').isNotEmpty) {
-      parts.add(entity.docName!.trim());
+  String _formatDocumentTitle(OperationItemEntity entity) {
+    final name = (entity.docName ?? '').trim();
+    final num = (entity.docNum ?? '').trim();
+    if (name.isEmpty && num.isEmpty) {
+      return entity.operationTypeName;
     }
-    if ((entity.docNum ?? '').isNotEmpty) {
-      parts.add('№ ${entity.docNum!.trim()}');
+    if (name.isEmpty) {
+      return num.isEmpty ? entity.operationTypeName : '№$num';
     }
-    if (parts.isEmpty) {
-      return null;
+    return num.isEmpty ? name : '$name №$num';
+  }
+
+  Color _colorForOperationType(int typeId) {
+    switch (typeId) {
+      case 1:
+        return AppColors.success;
+      case 2:
+        return AppColors.warning;
+      case 3:
+        return AppColors.error;
+      default:
+        return AppColors.brand;
     }
-    return 'Документ: ${parts.join(' ')}';
   }
 }
 
@@ -119,20 +148,22 @@ class _ProductRow extends StatelessWidget {
     final theme = Theme.of(context);
     final product = model.entity.product;
     final quantityLabel = _formatQuantity(model);
-
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           CircleAvatar(
             radius: 18,
-            backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+            backgroundColor: model.signSymbol == '+'
+                ? AppColors.bgSuccess
+                : AppColors.bgError,
             child: Text(
               model.signSymbol,
               style: theme.textTheme.titleMedium?.copyWith(
                 color: model.signSymbol == '+'
-                    ? Colors.green.shade700
-                    : Colors.red.shade600,
+                    ? AppColors.success
+                    : AppColors.error,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -153,13 +184,14 @@ class _ProductRow extends StatelessWidget {
                       ? 'Инвентарный номер отсутствует'
                       : product.inventoryNumber,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.hintColor,
+                    color: AppColors.textSubTitle,
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 12),
+          // Quantity with tabular figures
           Text(
             quantityLabel,
             style: theme.textTheme.titleMedium?.copyWith(

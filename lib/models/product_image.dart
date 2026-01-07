@@ -29,6 +29,9 @@ class ProductImage extends HiveObject {
   @HiveField(7)
   bool isUploading; // защита от повторной отправки
 
+  @HiveField(8)
+  bool hasError;
+
   ProductImage({
     required this.localPath,
     this.serverUrl,
@@ -38,5 +41,6 @@ class ProductImage extends HiveObject {
     this.uploadProgress = 0.0,
     String? clientId,
     this.isUploading = false,
+    this.hasError = false,
   }) : clientId = clientId ?? const Uuid().v4();
 }

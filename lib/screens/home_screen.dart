@@ -217,9 +217,7 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Фото
       statusText.value = 'Синхронизируем фото...';
       steps.value = {...steps.value, 'Фото': 0.0};
-      final List<NotificationModel> imgNotifs =
-          await ImageSyncService.syncAllImages();
-      for (final n in imgNotifs) await NotificationService.addNotification(n);
+      await ImageSyncService.syncAllImages();
       steps.value = {...steps.value, 'Фото': 1.0};
 
       statusText.value = 'Готово';

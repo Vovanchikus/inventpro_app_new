@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import '../models/notification_model.dart';
 import '../viewmodels/notifications_viewmodel.dart';
 import '../theme/colors.dart';
-import '../widgets/photo_notification_card.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -20,7 +19,6 @@ class _NotificationsPageState extends State<NotificationsPage>
   final List<Tab> tabs = const [
     Tab(text: 'Категории'),
     Tab(text: 'Товары'),
-    Tab(text: 'Фотографии'),
     Tab(text: 'Операции'),
   ];
 
@@ -47,9 +45,6 @@ class _NotificationsPageState extends State<NotificationsPage>
             t = NotificationType.product;
             break;
           case 2:
-            t = NotificationType.photo;
-            break;
-          case 3:
             t = NotificationType.operation;
             break;
         }
@@ -117,7 +112,7 @@ class _NotificationsPageState extends State<NotificationsPage>
       case NotificationType.product:
         return Icons.inventory_2_outlined;
       case NotificationType.photo:
-        return Icons.camera_alt_outlined;
+        return Icons.notifications_outlined;
       case NotificationType.operation:
         return Icons.swap_horiz;
     }
@@ -138,22 +133,6 @@ class _NotificationsPageState extends State<NotificationsPage>
   }
 
   String _statusLabel(NotificationModel n) {
-    // Для фото — подробные пользовательские тексты
-    if (n.type == NotificationType.photo) {
-      switch (n.status) {
-        case NotificationStatus.pending:
-          return 'Фото добавлено (ожидает синхронизации)';
-        case NotificationStatus.uploading:
-          return 'Фото загружается…';
-        case NotificationStatus.synced:
-        case NotificationStatus.success:
-          return 'Фото добавлено и синхронизировано';
-        case NotificationStatus.error:
-          return 'Фото добавлено, синхронизация не выполнена';
-      }
-    }
-
-    // Для остальных типов — общие, нейтральные тексты
     switch (n.status) {
       case NotificationStatus.pending:
         return 'Новая запись';
@@ -181,61 +160,48 @@ class _NotificationsPageState extends State<NotificationsPage>
         final n = list[idx];
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: n.type == NotificationType.photo
-              ? Builder(
-                  builder: (ctx) {
-                    final data = vm.cardDataFor(n);
-                    return SizedBox(
-                      width: double.infinity,
-                      child: PhotoNotificationCard(data: data),
-                    );
-                  },
-                )
-              : Card(
-                  elevation: 1,
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: AppColors.bgLight,
-                      child: Icon(_iconForType(n.type), color: AppColors.brand),
+          child: Card(
+            elevation: 1,
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: AppColors.bgLight,
+                child: Icon(_iconForType(n.type), color: AppColors.brand),
+              ),
+              title: Text(
+                n.title,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(n.description),
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    DateFormat('dd.MM.y HH:mm').format(n.timestamp),
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
                     ),
-                    title: Text(
-                      n.title,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    decoration: BoxDecoration(
+                      color: _statusColor(n.status).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    subtitle: Text(n.description),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          DateFormat('dd.MM.y HH:mm').format(n.timestamp),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _statusColor(n.status).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            _statusLabel(n),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _statusColor(n.status),
-                            ),
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      _statusLabel(n),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _statusColor(n.status),
+                      ),
                     ),
                   ),
-                ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
@@ -257,7 +223,6 @@ class _NotificationsPageState extends State<NotificationsPage>
           tabs: [
             _tabWithBadge('Категории', vm.unreadCategories),
             _tabWithBadge('Товары', vm.unreadProducts),
-            _tabWithBadge('Фотографии', vm.unreadPhotos),
             _tabWithBadge('Операции', vm.unreadOperations),
           ],
           isScrollable: false,
@@ -273,10 +238,6 @@ class _NotificationsPageState extends State<NotificationsPage>
           RefreshIndicator(
             onRefresh: _onRefresh,
             child: _buildList(vm.products, 'Нет изменений в товарах'),
-          ),
-          RefreshIndicator(
-            onRefresh: _onRefresh,
-            child: _buildList(vm.photos, 'Нет изменений с фотографиями'),
           ),
           RefreshIndicator(
             onRefresh: _onRefresh,

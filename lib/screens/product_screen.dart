@@ -8,9 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:collection/collection.dart';
-import '../services/notification_service.dart';
-import '../models/notification_model.dart';
-import '../models/photo_sync_status.dart';
 
 import '../theme/colors.dart';
 import '../boxes/hive_boxes.dart';
@@ -237,13 +234,6 @@ class _ProductScreenState extends State<ProductScreen> {
 
         await _imageBox.add(serverImg);
         _images.add(serverImg);
-        // Создаём/обновляем единое уведомление для скачанного фото
-        await NotificationService.upsertOrUpdatePhotoNotification(
-          clientId: serverImg.clientId,
-          productId: serverImg.productId,
-          status: PhotoSyncStatus.synced,
-          serverUrl: serverImg.serverUrl,
-        );
       } catch (e) {
         print('[PRODUCT SCREEN] ❌ Ошибка скачивания: $e');
       }
@@ -323,14 +313,6 @@ class _ProductScreenState extends State<ProductScreen> {
 
       await _imageBox.add(newImg);
 
-      // Создаём/обновляем единое уведомление для локально добавленного фото
-      await NotificationService.upsertOrUpdatePhotoNotification(
-        clientId: newImg.clientId,
-        productId: newImg.productId,
-        status: PhotoSyncStatus.pending,
-        localPath: newImg.localPath,
-      );
-
       setState(() {
         _images.add(newImg);
       });
@@ -395,41 +377,14 @@ class _ProductScreenState extends State<ProductScreen> {
             _images.add(img);
           }
           setState(() {});
-          // Обновляем единое уведомление — фото синхронизировано
-          await NotificationService.upsertOrUpdatePhotoNotification(
-            clientId: img.clientId,
-            productId: img.productId,
-            status: PhotoSyncStatus.synced,
-            serverUrl: serverUrl,
-          );
         } else {
           print('[UPLOAD] ❌ serverUrl не вернулся');
-          await NotificationService.upsertOrUpdatePhotoNotification(
-            clientId: img.clientId,
-            productId: img.productId,
-            status: PhotoSyncStatus.error,
-            errorText: 'Не удалось получить адрес изображения от сервера',
-          );
         }
       } else {
         print('[UPLOAD] ❌ HTTP ${streamed.statusCode}');
-        await NotificationService.upsertOrUpdatePhotoNotification(
-          clientId: img.clientId,
-          productId: img.productId,
-          status: PhotoSyncStatus.error,
-          errorText: 'Ошибка сервера: HTTP ${streamed.statusCode}',
-        );
       }
     } catch (e) {
       print('[UPLOAD] ❌ Ошибка загрузки: $e');
-      await NotificationService.upsertOrUpdatePhotoNotification(
-        clientId: img.clientId,
-        productId: img.productId,
-        status: (e is SocketException)
-            ? PhotoSyncStatus.paused
-            : PhotoSyncStatus.error,
-        errorText: 'Ошибка загрузки: ${e.toString()}',
-      );
     } finally {
       img.isUploading = false;
       await img.save();

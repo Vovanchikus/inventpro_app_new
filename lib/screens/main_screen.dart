@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import '../boxes/hive_boxes.dart';
 import '../models/notification_model.dart';
+import '../models/product_image.dart';
 
 import '../theme/colors.dart';
 import '../widgets/app_bottom_bar.dart';
 
 import 'home_screen.dart';
+import 'images_sync_center_screen.dart';
 import 'warehouse_screen.dart';
 import 'operation_history_screen.dart';
 import 'qr_screen.dart';
@@ -72,6 +75,59 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     _pageController.dispose();
     _syncController.dispose();
     super.dispose();
+  }
+
+  Widget _buildSyncCenterShortcut() {
+    if (!Hive.isBoxOpen(HiveBoxes.productImages)) {
+      Hive.openBox<ProductImage>(HiveBoxes.productImages).then((_) {
+        if (mounted) setState(() {});
+      });
+      return IconButton(
+        icon: const Icon(Icons.notifications_none_outlined),
+        color: AppColors.textTitle,
+        onPressed: _openSyncCenter,
+      );
+    }
+
+    return ValueListenableBuilder(
+      valueListenable: Hive.box<ProductImage>(
+        HiveBoxes.productImages,
+      ).listenable(),
+      builder: (context, Box<ProductImage> box, _) {
+        final counter = _unsyncedCounter(box);
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.notifications_none_outlined),
+              color: AppColors.textTitle,
+              onPressed: _openSyncCenter,
+            ),
+            if (counter > 0)
+              Positioned(
+                right: 4,
+                top: 6,
+                child: _Badge(label: counter > 99 ? '99+' : '$counter'),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  int _unsyncedCounter(Box<ProductImage> box) {
+    var total = 0;
+    for (final image in box.values) {
+      if (image.isSynced) continue;
+      total += 1;
+    }
+    return total;
+  }
+
+  void _openSyncCenter() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ImagesSyncCenterScreen()));
   }
 
   /// ==========================
@@ -191,6 +247,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 ? _buildSyncButton()
                 : const SizedBox.shrink(key: ValueKey('empty')),
           ),
+          _buildSyncCenterShortcut(),
           Hive.isBoxOpen('notificationsBox')
               ? ValueListenableBuilder(
                   valueListenable: Hive.box('notificationsBox').listenable(),
@@ -233,27 +290,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                           Positioned(
                             right: 4,
                             top: 6,
-                            child: IgnorePointer(
-                              ignoring: true,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  count.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
+                            child: _Badge(label: count.toString()),
                           ),
                       ],
                     );
@@ -291,6 +328,34 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             context,
           ).push(MaterialPageRoute(builder: (_) => const QrScreen()));
         },
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

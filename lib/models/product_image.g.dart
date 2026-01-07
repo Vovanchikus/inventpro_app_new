@@ -25,13 +25,14 @@ class ProductImageAdapter extends TypeAdapter<ProductImage> {
       uploadProgress: fields[5] as double,
       clientId: fields[6] as String?,
       isUploading: fields[7] as bool,
+      hasError: fields[8] as bool? ?? false,
     );
   }
 
   @override
   void write(BinaryWriter writer, ProductImage obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(9)
       ..writeByte(0)
       ..write(obj.localPath)
       ..writeByte(1)
@@ -47,7 +48,9 @@ class ProductImageAdapter extends TypeAdapter<ProductImage> {
       ..writeByte(6)
       ..write(obj.clientId)
       ..writeByte(7)
-      ..write(obj.isUploading);
+      ..write(obj.isUploading)
+      ..writeByte(8)
+      ..write(obj.hasError);
   }
 
   @override

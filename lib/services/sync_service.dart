@@ -1,14 +1,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:hive/hive.dart';
-
 import 'api_service.dart';
 import 'image_sync_service.dart';
 import 'notification_service.dart';
 import '../models/notification_model.dart';
-import '../models/product.dart';
-import '../models/product_image.dart';
-import '../boxes/hive_boxes.dart';
 
 enum SyncStep { idle, syncingData, syncingImages, completed, error }
 
@@ -79,16 +74,11 @@ class SyncService {
       statusText.value = 'Синхронизация изображений...';
       progress.value = 0.3;
 
-      // Синхронизация изображений: получаем уведомления о скачанных картинках
-      final imageNotifications = await ImageSyncService.syncAllImages();
+      // Синхронизация изображений выполняется отдельно и больше не создаёт уведомления
+      await ImageSyncService.syncAllImages();
 
-      // Комбинируем уведомления от данных и от изображений
-      final allNotifications = <NotificationModel>[];
-      allNotifications.addAll(dataNotifications);
-      allNotifications.addAll(imageNotifications);
-
-      // Отправляем уведомления через NotificationService
-      for (final n in allNotifications) {
+      // Отправляем уведомления по данным через NotificationService
+      for (final n in dataNotifications) {
         await NotificationService.addNotification(n);
       }
 

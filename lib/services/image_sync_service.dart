@@ -9,25 +9,19 @@ import 'package:path_provider/path_provider.dart';
 import '../boxes/hive_boxes.dart';
 import '../models/product_image.dart';
 import '../models/product.dart';
-import '../models/notification_model.dart';
-import '../models/photo_sync_status.dart';
-import '../services/notification_service.dart';
 import 'config.dart';
 
 class ImageSyncService {
   /// 🔥 Главная точка синхронизации
-  static Future<List<NotificationModel>> syncAllImages() async {
+  static Future<void> syncAllImages() async {
     print('================ IMAGE SYNC STARTED ================');
 
     final box = Hive.box<ProductImage>(HiveBoxes.productImages);
     final productBox = Hive.box<Product>(HiveBoxes.products);
 
     print('[SYNC] Локальных изображений в Hive: ${box.length}');
-    final List<NotificationModel> notifications = [];
-
     // 1️⃣ Синхронизация с сервера
-    final downloaded = await _syncFromServer(box, productBox);
-    notifications.addAll(downloaded);
+    await _syncFromServer(box, productBox);
 
     // 2️⃣ Загрузка новых локальных изображений
     final unsynced = box.values.where((img) => img.isNew).toList();
@@ -36,11 +30,12 @@ class ImageSyncService {
     );
 
     for (final img in unsynced) {
+      img.hasError = false;
+      await img.save();
       _uploadImage(img, productBox);
     }
 
     print('================ IMAGE SYNC FINISHED ================');
-    return notifications;
   }
 
   /// Синхронизировать один объект изображения (используется SyncService)
@@ -53,8 +48,31 @@ class ImageSyncService {
       return;
     }
 
+    img.hasError = false;
+    await img.save();
     // Если это локальное новое изображение — загружаем
     await _uploadImage(img, productBox);
+  }
+
+  /// Повторная синхронизация для всех изображений конкретного товара
+  static Future<void> syncImagesForProduct(int productId) async {
+    final imageBox = Hive.box<ProductImage>(HiveBoxes.productImages);
+    final productBox = Hive.box<Product>(HiveBoxes.products);
+
+    final images = imageBox.values
+        .whereType<ProductImage>()
+        .where((img) => img.productId == productId)
+        .toList();
+
+    for (final img in images) {
+      if (img.isUploading) continue;
+      if (img.isSynced && !img.hasError) continue;
+      img.hasError = false;
+      img.isNew = !img.isSynced;
+      img.uploadProgress = 0.0;
+      await img.save();
+      await _uploadImage(img, productBox);
+    }
   }
 
   /// ➕ Добавление фото локально (сразу отображается)
@@ -78,6 +96,7 @@ class ImageSyncService {
       serverUrl: null,
       isNew: true,
       isSynced: false,
+      hasError: false,
     );
 
     await box.add(img);
@@ -90,14 +109,6 @@ class ImageSyncService {
     }
 
     print('[LOCAL] Фото добавлено локально: ${file.path}');
-
-    // Создаём/обновляем единое уведомление для этого фото — pending
-    await NotificationService.upsertOrUpdatePhotoNotification(
-      clientId: img.clientId,
-      productId: productId,
-      status: PhotoSyncStatus.pending,
-      localPath: img.localPath,
-    );
 
     // 🔄 Запускаем асинхронную загрузку
     _uploadImage(img, productBox);
@@ -116,15 +127,8 @@ class ImageSyncService {
     print('[UPLOAD] Старт загрузки: ${img.localPath}');
     img.isUploading = true;
     img.uploadProgress = 0.0;
+    img.hasError = false;
     await img.save();
-
-    // Обновляем уведомление в статус uploading
-    await NotificationService.upsertOrUpdatePhotoNotification(
-      clientId: img.clientId,
-      productId: img.productId,
-      status: PhotoSyncStatus.uploading,
-      localPath: img.localPath,
-    );
 
     try {
       final uri = Uri.parse('${Config.baseUrl}/api/upload');
@@ -147,14 +151,8 @@ class ImageSyncService {
       if (streamed.statusCode != 200) {
         print('[UPLOAD] ❌ Ошибка HTTP ${streamed.statusCode}');
         img.isUploading = false;
+        img.hasError = true;
         await img.save();
-        // Ошибка HTTP — помечаем как error
-        await NotificationService.upsertOrUpdatePhotoNotification(
-          clientId: img.clientId,
-          productId: img.productId,
-          status: PhotoSyncStatus.error,
-          errorText: 'Ошибка сервера: HTTP ${streamed.statusCode}',
-        );
         return;
       }
 
@@ -164,13 +162,8 @@ class ImageSyncService {
       if (serverUrl == null) {
         print('[UPLOAD] ❌ serverUrl не вернулся');
         img.isUploading = false;
+        img.hasError = true;
         await img.save();
-        await NotificationService.upsertOrUpdatePhotoNotification(
-          clientId: img.clientId,
-          productId: img.productId,
-          status: PhotoSyncStatus.error,
-          errorText: 'Сервер не вернул адрес изображения',
-        );
         return;
       }
 
@@ -180,6 +173,7 @@ class ImageSyncService {
       img.isNew = false;
       img.uploadProgress = 1.0;
       img.isUploading = false;
+      img.hasError = false;
       await img.save();
 
       print('[UPLOAD] ✅ Загружено на сервер: $serverUrl');
@@ -190,14 +184,6 @@ class ImageSyncService {
         product.images = [...product.images, serverUrl];
         await productBox.put(product.id, product);
       }
-
-      // Обновляем уведомление — synced
-      await NotificationService.upsertOrUpdatePhotoNotification(
-        clientId: img.clientId,
-        productId: img.productId,
-        status: PhotoSyncStatus.synced,
-        serverUrl: serverUrl,
-      );
     } catch (e) {
       if (e is SocketException) {
         print('[UPLOAD] Сеть недоступна — помечаем как приостановлено');
@@ -206,20 +192,13 @@ class ImageSyncService {
       }
       img.isUploading = false;
       img.uploadProgress = 0.0;
+      img.hasError = true;
       await img.save();
-      await NotificationService.upsertOrUpdatePhotoNotification(
-        clientId: img.clientId,
-        productId: img.productId,
-        status: (e is SocketException)
-            ? PhotoSyncStatus.paused
-            : PhotoSyncStatus.error,
-        errorText: 'Ошибка при загрузке: $e',
-      );
     }
   }
 
   /// 🔄 Синхронизация с сервера
-  static Future<List<NotificationModel>> _syncFromServer(
+  static Future<void> _syncFromServer(
     Box<ProductImage> box,
     Box<Product> productBox,
   ) async {
@@ -231,16 +210,15 @@ class ImageSyncService {
 
     if (resp.statusCode != 200) {
       print('[SERVER SYNC] ❌ Ошибка HTTP ${resp.statusCode}');
-      return <NotificationModel>[];
+      return;
     }
 
     final data = jsonDecode(resp.body);
     if (data['success'] != true) {
       print('[SERVER SYNC] ❌ success=false');
-      return <NotificationModel>[];
+      return;
     }
 
-    final List<NotificationModel> notifications = [];
     for (final product in data['data']) {
       final int productId = product['id'];
       final List images = product['images'] ?? [];
@@ -262,21 +240,7 @@ class ImageSyncService {
         }
 
         print('[SERVER SYNC] ⬇ Скачиваем: $serverUrl');
-        final downloaded = await _downloadImage(
-          productId,
-          serverUrl,
-          box,
-          productBox,
-        );
-        if (downloaded != null) {
-          // Создаём/обновляем единое уведомление для скачанного фото
-          await NotificationService.upsertOrUpdatePhotoNotification(
-            clientId: downloaded.clientId,
-            productId: downloaded.productId,
-            status: NotificationStatus.synced,
-            serverUrl: downloaded.serverUrl,
-          );
-        }
+        await _downloadImage(productId, serverUrl, box, productBox);
       }
     }
 
@@ -305,7 +269,6 @@ class ImageSyncService {
         }
       }
     }
-    return notifications;
   }
 
   /// ⬇ Скачивание изображения с сервера
@@ -332,6 +295,7 @@ class ImageSyncService {
           localPath: '',
           isNew: false,
           isSynced: true,
+          hasError: false,
         ),
       );
       if (existing.productId != -1) {
@@ -339,6 +303,7 @@ class ImageSyncService {
         existing.serverUrl = serverUrl;
         existing.isSynced = true;
         existing.isNew = false;
+        existing.hasError = false;
         await existing.save();
         return existing;
       }
@@ -358,6 +323,7 @@ class ImageSyncService {
         serverUrl: serverUrl,
         isNew: false,
         isSynced: true,
+        hasError: false,
       );
 
       await box.add(img);
